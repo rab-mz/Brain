@@ -92,13 +92,14 @@
     const parsed = parseDocument(text)
     parsed.blocks = normalizeBlocks(parsed.blocks)
     doc = parsed
-    await tick()
     // Entering a document always selects the end of the last line, caret
-    // blinking. IMPORTANT: read the target through `doc` (the reactive
-    // proxy) — the child component receives proxied blocks, so comparing
-    // against the raw parsed object would never match.
+    // blinking. Set the target BEFORE rendering so onNoteReady can never
+    // race past it. IMPORTANT: read it through `doc` (the reactive proxy)
+    // — child components receive proxied blocks, so comparing against the
+    // raw parsed object would never match.
     const blocks = doc!.blocks
     autofocusTarget = blocks[blocks.length - 1]
+    await tick()
   })
 
   // Files are the source of truth: pick up external edits on window focus.

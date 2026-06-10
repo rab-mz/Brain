@@ -454,6 +454,18 @@ textarea {
   min-height: 24px;
 }
 
+/* Custom caret drawn by CodeMirror: thick, accent-colored, always visible. */
+.note-host .cm-cursor,
+.note-host .cm-dropCursor {
+  border-left: 2px solid var(--accent);
+  margin-left: 0;
+}
+
+.note-host .cm-selectionBackground,
+.note-host .cm-content ::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent) !important;
+}
+
 /* ---------- Floating "+" ---------- */
 
 .float-plus {

@@ -158,6 +158,9 @@ export async function createNoteEditor(
       extensions: [
         history(),
         EditorView.lineWrapping,
+        // Custom drawn caret/selection: reliably visible (and blinking)
+        // even on empty documents, unlike the native caret.
+        drawSelection({ cursorBlinkRate: 1000 }),
         keymap.of([
           { key: 'Mod-b', run: toggleWrap('**') },
           { key: 'Mod-i', run: toggleWrap('*') },
@@ -176,20 +179,31 @@ export async function createNoteEditor(
     })
   })
 
+  function placeCaret(pos: number) {
+    view.focus()
+    view.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
+    // Focus can be lost to whatever element the triggering click landed
+    // on; verify on the next frame and retake it if needed.
+    requestAnimationFrame(() => {
+      if (!view.hasFocus) {
+        view.focus()
+        view.dispatch({ selection: { anchor: pos }, scrollIntoView: true })
+      }
+    })
+  }
+
   return {
     getOffset() {
       return view.state.selection.main.head
     },
     focusEnd() {
-      view.focus()
-      view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true })
+      placeCaret(view.state.doc.length)
     },
     // Place the caret at the position nearest to a click anywhere on the
     // page, so the whole surface feels writable.
     focusAt(x: number, y: number) {
       const pos = view.posAtCoords({ x, y }, false)
-      view.focus()
-      view.dispatch({ selection: { anchor: pos ?? view.state.doc.length }, scrollIntoView: true })
+      placeCaret(pos ?? view.state.doc.length)
     },
     destroy() {
       view.destroy()
