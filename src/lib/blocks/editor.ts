@@ -2,7 +2,7 @@
 // from CodeBlock.svelte / NoteBlock.svelte, so none of it lands in the
 // initial bundle.
 
-import { EditorView, keymap, drawSelection, highlightActiveLine, placeholder } from '@codemirror/view'
+import { EditorView, keymap, drawSelection, highlightActiveLine } from '@codemirror/view'
 import { EditorState, Compartment, type Extension } from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import {
@@ -145,7 +145,6 @@ export async function createNoteEditor(
   parent: HTMLElement,
   opts: {
     text: string
-    placeholder: string
     onChange(text: string): void
     onFocus(): void
   }
@@ -169,7 +168,6 @@ export async function createNoteEditor(
         markdown(),
         syntaxHighlighting(markdownHighlight),
         noteTheme,
-        placeholder(opts.placeholder),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) opts.onChange(update.state.doc.toString())
           if (update.focusChanged && update.view.hasFocus) opts.onFocus()
@@ -184,14 +182,14 @@ export async function createNoteEditor(
     },
     focusEnd() {
       view.focus()
-      view.dispatch({ selection: { anchor: view.state.doc.length } })
+      view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true })
     },
     // Place the caret at the position nearest to a click anywhere on the
     // page, so the whole surface feels writable.
     focusAt(x: number, y: number) {
       const pos = view.posAtCoords({ x, y }, false)
       view.focus()
-      view.dispatch({ selection: { anchor: pos ?? view.state.doc.length } })
+      view.dispatch({ selection: { anchor: pos ?? view.state.doc.length }, scrollIntoView: true })
     },
     destroy() {
       view.destroy()

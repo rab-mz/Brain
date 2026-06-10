@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
-  import { t } from '../i18n'
   import type { Block } from '../parser/parser'
   import type { NoteEditor } from './editor'
 
@@ -30,11 +29,9 @@
     if (!host || api) return
     let disposed = false
     const target = host
-    const ph = $t('note.ph')
     import('./editor').then(async (mod) => {
       const created = await mod.createNoteEditor(target, {
         text: block.text,
-        placeholder: ph,
         onChange: (text) => {
           block.text = text
           onedit()

@@ -22,7 +22,6 @@
   } = $props()
 
   let doc: BrainDoc | null = $state(null)
-  let docEl: HTMLElement | null = $state(null)
   let plusOpen = $state(false)
   let lastFileContent = ''
   let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -62,27 +61,21 @@
   }
 
   /**
-   * The document is rendered as one continuous note surface: empty padding
-   * notes are kept at the start/end and between special blocks so there is
-   * always somewhere to click and write, and adjacent notes are merged.
+   * The document is one continuous note surface: adjacent notes merge and
+   * empty ones are dropped, so consecutive snippets stack in a column.
+   * Only a single trailing note is kept (it grows to fill the page), so
+   * there is always somewhere to write at the end.
    */
   function normalizeBlocks(blocks: Block[]): Block[] {
-    const merged: Block[] = []
+    const out: Block[] = []
     for (const b of blocks) {
       if (b.type === 'note') {
         if (b.text.trim() === '') continue
-        const prev = merged[merged.length - 1]
+        const prev = out[out.length - 1]
         if (prev && prev.type === 'note') {
-          merged[merged.length - 1] = { type: 'note', text: prev.text + '\n\n' + b.text }
+          out[out.length - 1] = { type: 'note', text: prev.text + '\n\n' + b.text }
           continue
         }
-      }
-      merged.push(b)
-    }
-    const out: Block[] = []
-    for (const b of merged) {
-      if (b.type !== 'note' && out[out.length - 1]?.type !== 'note') {
-        out.push({ type: 'note', text: '' })
       }
       out.push(b)
     }
@@ -100,14 +93,12 @@
     parsed.blocks = normalizeBlocks(parsed.blocks)
     doc = parsed
     await tick()
-    // Autofocus the remembered note when resuming, the last one otherwise,
-    // so the caret is blinking as soon as the document opens.
-    const savedIndex = restoreCursor()
-    let target = parsed.blocks[parsed.blocks.length - 1] as object
-    if (savedIndex != null && parsed.blocks[savedIndex]?.type === 'note') {
-      target = parsed.blocks[savedIndex]
-    }
-    autofocusTarget = target
+    // Entering a document always selects the end of the last line, caret
+    // blinking. IMPORTANT: read the target through `doc` (the reactive
+    // proxy) — the child component receives proxied blocks, so comparing
+    // against the raw parsed object would never match.
+    const blocks = doc!.blocks
+    autofocusTarget = blocks[blocks.length - 1]
   })
 
   // Files are the source of truth: pick up external edits on window focus.
@@ -192,37 +183,13 @@
     doc.frontmatter.title = (e.target as HTMLInputElement).value
     scheduleSave()
   }
-
-  function rememberCursor(index: number) {
-    try {
-      localStorage.setItem('brain:cursor', JSON.stringify({ path, block: index }))
-    } catch {
-      // Ignore: resume position just won't persist.
-    }
-  }
-
-  /** Scrolls to the remembered block and returns its index, if any. */
-  function restoreCursor(): number | null {
-    try {
-      const raw = localStorage.getItem('brain:cursor')
-      if (!raw) return null
-      const saved = JSON.parse(raw) as { path: string; block: number }
-      if (saved.path !== path) return null
-      const el = docEl?.querySelector(`[data-block-index="${saved.block}"]`)
-      if (!el) return null
-      el.scrollIntoView({ block: 'center' })
-      return saved.block
-    } catch {
-      return null
-    }
-  }
 </script>
 
 <svelte:window onfocus={onWindowFocus} />
 
 {#if doc}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <article class="doc-outer" bind:this={docEl} onclick={onBackgroundClick}>
+  <article class="doc-outer" onclick={onBackgroundClick}>
     <div class="doc-inner">
       <div class="doc-head">
         {#if isJournal}
@@ -239,13 +206,7 @@
       </div>
 
       {#each doc.blocks as block, i (idOf(block))}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="block"
-          class:block-special={block.type !== 'note'}
-          data-block-index={i}
-          onfocusin={() => rememberCursor(i)}
-        >
+        <div class="block" class:block-special={block.type !== 'note'}>
           {#if block.type === 'todo'}
             <TodoBlock {block} onedit={scheduleSave} />
           {:else if block.type === 'code'}
