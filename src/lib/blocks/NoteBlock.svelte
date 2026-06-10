@@ -20,6 +20,9 @@
 
   let host: HTMLElement | null = $state(null)
   let api: NoteEditor | null = $state(null)
+  // A click that lands before CodeMirror finished loading is replayed as
+  // soon as the editor exists, so the first click always places the caret.
+  let pendingFocus: { x: number; y: number } | null = null
 
   // The markdown editor (CodeMirror) is loaded lazily; the raw text is
   // visible immediately via the fallback <pre>.
@@ -44,6 +47,10 @@
       }
       api = created
       onready(block, created)
+      if (pendingFocus) {
+        created.focusAt(pendingFocus.x, pendingFocus.y)
+        pendingFocus = null
+      }
     })
     return () => {
       disposed = true
@@ -51,9 +58,21 @@
   })
 
   onDestroy(() => api?.destroy())
+
+  // Clicks on the wrapper's dead space (padding, area beside short lines)
+  // still place the caret at the nearest position.
+  function onClick(e: MouseEvent) {
+    if ((e.target as HTMLElement).closest('.cm-content')) return
+    if (api) {
+      api.focusAt(e.clientX, e.clientY)
+    } else {
+      pendingFocus = { x: e.clientX, y: e.clientY }
+    }
+  }
 </script>
 
-<div class="note-wrap" class:grow>
+<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+<div class="note-wrap" class:grow onclick={onClick}>
   <div class="note-host" bind:this={host}>
     {#if !api}
       <pre class="note-fallback">{block.text}</pre>

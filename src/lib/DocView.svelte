@@ -48,8 +48,14 @@
   // focused note at the cursor, and background clicks can focus the page.
   const noteApis = new WeakMap<object, NoteEditor>()
   let lastActiveNote: object | null = null
+  let autofocusTarget: object | null = null
   function onNoteReady(block: object, api: NoteEditor) {
     noteApis.set(block, api)
+    // The caret should be visible the moment a document opens.
+    if (block === autofocusTarget) {
+      autofocusTarget = null
+      api.focusEnd()
+    }
   }
   function onNoteActive(block: object) {
     lastActiveNote = block
@@ -94,7 +100,14 @@
     parsed.blocks = normalizeBlocks(parsed.blocks)
     doc = parsed
     await tick()
-    restoreCursor()
+    // Autofocus the remembered note when resuming, the last one otherwise,
+    // so the caret is blinking as soon as the document opens.
+    const savedIndex = restoreCursor()
+    let target = parsed.blocks[parsed.blocks.length - 1] as object
+    if (savedIndex != null && parsed.blocks[savedIndex]?.type === 'note') {
+      target = parsed.blocks[savedIndex]
+    }
+    autofocusTarget = target
   })
 
   // Files are the source of truth: pick up external edits on window focus.
@@ -171,7 +184,7 @@
     if ((e.target as HTMLElement).closest('.block, .doc-head, .float-plus')) return
     if (!doc) return
     const last = doc.blocks[doc.blocks.length - 1]
-    if (last?.type === 'note') noteApis.get(last)?.focusEnd()
+    if (last?.type === 'note') noteApis.get(last)?.focusAt(e.clientX, e.clientY)
   }
 
   function onTitleInput(e: Event) {
@@ -188,16 +201,19 @@
     }
   }
 
-  function restoreCursor() {
+  /** Scrolls to the remembered block and returns its index, if any. */
+  function restoreCursor(): number | null {
     try {
       const raw = localStorage.getItem('brain:cursor')
-      if (!raw) return
+      if (!raw) return null
       const saved = JSON.parse(raw) as { path: string; block: number }
-      if (saved.path !== path) return
+      if (saved.path !== path) return null
       const el = docEl?.querySelector(`[data-block-index="${saved.block}"]`)
-      el?.scrollIntoView({ block: 'center' })
+      if (!el) return null
+      el.scrollIntoView({ block: 'center' })
+      return saved.block
     } catch {
-      // Ignore corrupt state.
+      return null
     }
   }
 </script>

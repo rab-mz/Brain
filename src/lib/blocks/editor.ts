@@ -137,6 +137,7 @@ function toggleWrap(marker: string) {
 export interface NoteEditor {
   getOffset(): number
   focusEnd(): void
+  focusAt(x: number, y: number): void
   destroy(): void
 }
 
@@ -184,6 +185,13 @@ export async function createNoteEditor(
     focusEnd() {
       view.focus()
       view.dispatch({ selection: { anchor: view.state.doc.length } })
+    },
+    // Place the caret at the position nearest to a click anywhere on the
+    // page, so the whole surface feels writable.
+    focusAt(x: number, y: number) {
+      const pos = view.posAtCoords({ x, y }, false)
+      view.focus()
+      view.dispatch({ selection: { anchor: pos ?? view.state.doc.length } })
     },
     destroy() {
       view.destroy()

@@ -429,7 +429,20 @@ textarea {
 
 .note-wrap.grow .cm-editor {
   flex: 1;
-  min-height: 30vh;
+  min-height: 40vh;
+}
+
+/* The editable content fills the empty page, so the first click anywhere
+   lands inside CodeMirror and shows the caret immediately. */
+.note-wrap.grow .cm-scroller {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.note-wrap.grow .cm-content {
+  flex: 1;
+  min-height: 40vh;
 }
 
 .note-fallback {
