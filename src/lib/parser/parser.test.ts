@@ -51,6 +51,11 @@ describe('parseDocument', () => {
     ])
   })
 
+  it('keeps blank lines inside a single continuous note block', () => {
+    const doc = parseDocument('one\n\ntwo\n\nthree\n')
+    expect(doc.blocks).toEqual([{ type: 'note', text: 'one\n\ntwo\n\nthree' }])
+  })
+
   it('treats a brain comment without a fence as note text', () => {
     const doc = parseDocument('<!-- brain label="lost" pinned -->\njust text\n')
     expect(doc.blocks).toEqual([{ type: 'note', text: '<!-- brain label="lost" pinned -->\njust text' }])
@@ -84,6 +89,20 @@ describe('parseDocument', () => {
   })
 })
 
+describe('serializeDocument', () => {
+  it('omits empty padding notes', () => {
+    const md = serializeDocument({
+      frontmatter: {},
+      blocks: [
+        { type: 'note', text: '' },
+        { type: 'code', language: 'sql', code: 'SELECT 1;', label: '', pinned: false },
+        { type: 'note', text: '' }
+      ]
+    })
+    expect(md).toBe('```sql\nSELECT 1;\n```\n')
+  })
+})
+
 describe('round-trip: parse(serialize(doc)) === doc', () => {
   it('round-trips a mixed document', () => {
     roundTrip({
@@ -94,6 +113,17 @@ describe('round-trip: parse(serialize(doc)) === doc', () => {
         { type: 'code', language: 'sql', code: 'SELECT 1;\nSELECT 2;', label: 'Queries', pinned: true },
         { type: 'note', text: 'Multi\nline\nnote' },
         { type: 'code', language: '', code: 'plain', label: '', pinned: false }
+      ]
+    })
+  })
+
+  it('round-trips notes with internal blank lines around special blocks', () => {
+    roundTrip({
+      frontmatter: { title: 'Continuous' },
+      blocks: [
+        { type: 'note', text: 'first paragraph\n\nsecond paragraph' },
+        { type: 'code', language: 'sql', code: 'SELECT 1;', label: 'q', pinned: true },
+        { type: 'note', text: 'after\n\nthe code\nblock' }
       ]
     })
   })

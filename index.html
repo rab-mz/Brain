@@ -5,10 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Brain</title>
     <script>
-      // Apply the saved theme before first paint to avoid a flash.
+      // Apply the saved theme and font before first paint to avoid a flash.
       try {
         var t = localStorage.getItem('brain:theme')
-        if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
+        if (['dark', 'light', 'sepia', 'ocean'].indexOf(t) >= 0) document.documentElement.dataset.theme = t
+        var f = localStorage.getItem('brain:font')
+        if (['sans', 'serif', 'mono'].indexOf(f) >= 0) document.documentElement.dataset.font = f
       } catch (e) {}
     </script>
   </head>

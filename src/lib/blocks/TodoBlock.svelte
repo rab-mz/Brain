@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from 'svelte'
+  import { t } from '../i18n'
   import type { Block } from '../parser/parser'
 
   let { block, onedit }: { block: Extract<Block, { type: 'todo' }>; onedit: () => void } = $props()
@@ -44,7 +45,7 @@
         class:done={item.done}
         type="text"
         value={item.text}
-        placeholder="To do…"
+        placeholder={$t('todo.ph')}
         oninput={(e) => {
           item.text = (e.target as HTMLInputElement).value
           onedit()

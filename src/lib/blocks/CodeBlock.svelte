@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
-  import { theme, showToast } from '../stores'
+  import { theme, isDarkTheme, showToast } from '../stores'
+  import { t } from '../i18n'
   import type { Block } from '../parser/parser'
   import type { BrainEditor } from './editor'
 
@@ -9,16 +10,19 @@
   let host: HTMLElement | null = $state(null)
   let editor: BrainEditor | null = $state(null)
 
+  const dark = $derived(isDarkTheme($theme))
+
   // CodeMirror is loaded lazily the first time a code block renders.
   $effect(() => {
     if (!host || editor) return
     let disposed = false
     const target = host
     import('./editor').then(async (mod) => {
+      const docTheme = document.documentElement.dataset.theme ?? 'dark'
       const created = await mod.createEditor(target, {
         code: block.code,
         language: block.language,
-        dark: document.documentElement.dataset.theme !== 'light',
+        dark: docTheme === 'dark' || docTheme === 'ocean',
         onChange: (code) => {
           block.code = code
           onedit()
@@ -36,7 +40,7 @@
   })
 
   $effect(() => {
-    editor?.setDark($theme === 'dark')
+    editor?.setDark(dark)
   })
 
   onDestroy(() => editor?.destroy())
@@ -44,9 +48,9 @@
   async function copy() {
     try {
       await navigator.clipboard.writeText(block.code)
-      showToast('Copied to clipboard')
+      showToast($t('toast.copied'))
     } catch {
-      showToast('Could not copy')
+      showToast($t('toast.copyFail'))
     }
   }
 </script>
@@ -58,7 +62,7 @@
         class="code-label"
         type="text"
         value={block.label}
-        placeholder="Label this query…"
+        placeholder={$t('code.labelPh')}
         oninput={(e) => {
           block.label = (e.target as HTMLInputElement).value
           onedit()
@@ -70,7 +74,7 @@
         class="code-lang"
         type="text"
         value={block.language}
-        placeholder="lang"
+        placeholder={$t('code.langPh')}
         oninput={(e) => {
           block.language = (e.target as HTMLInputElement).value
           onedit()
@@ -80,7 +84,7 @@
     <button
       class="icon-btn pin"
       class:pinned={block.pinned}
-      title={block.pinned ? 'Unpin from palette' : 'Pin to palette (Cmd/Ctrl+K)'}
+      title={block.pinned ? $t('code.unpin') : $t('code.pin')}
       onclick={() => {
         block.pinned = !block.pinned
         onedit()
@@ -88,7 +92,7 @@
     >
       {block.pinned ? '★' : '☆'}
     </button>
-    <button class="icon-btn" title="Copy code" onclick={copy}>Copy</button>
+    <button class="icon-btn" title={$t('code.copy')} onclick={copy}>{$t('code.copyBtn')}</button>
   </div>
   <div class="code-host" bind:this={host}>
     {#if !editor}

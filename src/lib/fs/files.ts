@@ -42,6 +42,11 @@ export async function writeFile(root: FileSystemDirectoryHandle, path: string, c
   await writable.close()
 }
 
+export async function deleteFile(root: FileSystemDirectoryHandle, path: string): Promise<void> {
+  const { dir, name } = await resolveDir(root, path)
+  await dir.removeEntry(name)
+}
+
 export async function fileExists(root: FileSystemDirectoryHandle, path: string): Promise<boolean> {
   try {
     const { dir, name } = await resolveDir(root, path)

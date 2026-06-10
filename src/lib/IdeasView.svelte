@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { readFile, writeFile } from './fs/files'
+  import { t } from './i18n'
   import { focusOnMount } from './actions'
 
   let { root }: { root: FileSystemDirectoryHandle } = $props()
@@ -47,12 +48,12 @@
 </script>
 
 <div class="ideas">
-  <h1 class="doc-title">Ideas</h1>
+  <h1 class="doc-title">{$t('ideas.title')}</h1>
   <input
     class="idea-input"
     use:focusOnMount
     bind:value={draft}
-    placeholder="Capture an idea — Enter to save"
+    placeholder={$t('ideas.ph')}
     onkeydown={(e) => {
       if (e.key === 'Enter') add()
     }}
@@ -65,7 +66,7 @@
       </li>
     {/each}
     {#if entries.length === 0}
-      <li class="side-empty">Nothing yet. Ideas land here, newest first.</li>
+      <li class="side-empty">{$t('ideas.empty')}</li>
     {/if}
   </ul>
 </div>

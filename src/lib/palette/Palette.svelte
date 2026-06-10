@@ -1,5 +1,6 @@
 <script lang="ts">
   import { brainIndex, paletteOpen, showToast } from '../stores'
+  import { t } from '../i18n'
   import { focusOnMount } from '../actions'
   import { fuzzyScore } from './fuzzy'
   import type { Snippet } from './snippets'
@@ -42,9 +43,9 @@
   async function choose(snippet: Snippet) {
     try {
       await navigator.clipboard.writeText(snippet.code)
-      showToast('Snippet copied')
+      showToast($t('toast.snippet'))
     } catch {
-      showToast('Could not copy')
+      showToast($t('toast.copyFail'))
     }
     paletteOpen.set(false)
   }
@@ -73,7 +74,7 @@
       class="palette-input"
       use:focusOnMount
       bind:value={query}
-      placeholder="Search pinned snippets…"
+      placeholder={$t('palette.ph')}
       onkeydown={onKeydown}
     />
     <ul class="palette-results" bind:this={listEl}>
@@ -93,7 +94,7 @@
       {/each}
       {#if results.length === 0}
         <li class="palette-empty">
-          {pinned.length === 0 ? 'No pinned snippets yet — pin a code block with ☆' : 'No match'}
+          {pinned.length === 0 ? $t('palette.none') : $t('palette.noMatch')}
         </li>
       {/if}
     </ul>

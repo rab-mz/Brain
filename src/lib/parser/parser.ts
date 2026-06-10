@@ -99,14 +99,17 @@ function parseBlocks(lines: string[], start: number): Block[] {
       continue
     }
 
-    // Note: consecutive lines until a blank line or another block type.
+    // Note: everything until the next special block. Blank lines stay inside
+    // the note so plain prose reads as one continuous editable area; only the
+    // trailing separator blanks are trimmed (round-trip safe).
     const noteLines: string[] = []
     while (i < lines.length) {
       const l = lines[i]
-      if (l.trim() === '' || FENCE_RE.test(l) || TODO_RE.test(l) || isMetaForFence(lines, i)) break
+      if (FENCE_RE.test(l) || TODO_RE.test(l) || isMetaForFence(lines, i)) break
       noteLines.push(l)
       i++
     }
+    while (noteLines.length > 0 && noteLines[noteLines.length - 1].trim() === '') noteLines.pop()
     blocks.push({ type: 'note', text: noteLines.join('\n') })
   }
 
@@ -120,6 +123,8 @@ export function serializeDocument(doc: BrainDoc): string {
     parts.push('---\n' + keys.map((k) => `${k}: ${doc.frontmatter[k]}`).join('\n') + '\n---')
   }
   for (const block of doc.blocks) {
+    // Empty notes are UI padding around special blocks, not content.
+    if (block.type === 'note' && block.text.trim() === '') continue
     parts.push(serializeBlock(block))
   }
   return parts.join('\n\n') + '\n'

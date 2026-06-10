@@ -1,20 +1,15 @@
 <script lang="ts">
-  import {
-    noteFiles,
-    journalFiles,
-    fileTitles,
-    currentPath,
-    sidebarCollapsed,
-    newNoteOpen,
-    theme
-  } from './stores'
+  import { noteFiles, journalFiles, fileTitles, currentPath, sidebarCollapsed, newNoteOpen } from './stores'
+  import { t, lang, formatDayList, type Lang } from './i18n'
   import { focusOnMount } from './actions'
 
   let {
+    rootName,
     onopen,
     oncreate,
     onexport
   }: {
+    rootName: string
     onopen: (path: string) => void
     oncreate: (title: string) => void
     onexport: () => void
@@ -24,9 +19,8 @@
 
   function todayString(): string {
     const d = new Date()
-    const mm = String(d.getMonth() + 1).padStart(2, '0')
-    const dd = String(d.getDate()).padStart(2, '0')
-    return `${d.getFullYear()}-${mm}-${dd}`
+    const p = (n: number) => String(n).padStart(2, '0')
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
   }
 
   const today = todayString()
@@ -52,26 +46,36 @@
   function noteLabel(name: string): string {
     return $fileTitles[`notes/${name}`] ?? name.replace(/\.md$/, '')
   }
+
+  function dayLabel(day: string, l: Lang): string {
+    const formatted = formatDayList(day, l)
+    if (day === today) return `${$t('sidebar.today')} · ${formatted}`
+    return formatted
+  }
+
+  function toggleLang() {
+    lang.update((l) => (l === 'en' ? 'it' : 'en'))
+  }
 </script>
 
 <aside class="sidebar">
   <div class="side-head">
     <span class="logo">Brain</span>
-    <button class="icon-btn" title="Collapse sidebar" onclick={() => sidebarCollapsed.set(true)}>«</button>
+    <button class="icon-btn" title={$t('sidebar.collapse')} onclick={() => sidebarCollapsed.set(true)}>«</button>
   </div>
 
   <nav class="side-scroll">
     <section class="side-section">
       <div class="side-title">
-        Notes
-        <button class="icon-btn" title="New note (Ctrl/Cmd+N or Alt+N)" onclick={() => newNoteOpen.set(true)}>+</button>
+        {$t('sidebar.notes')}
+        <button class="icon-btn" title={$t('sidebar.newNote')} onclick={() => newNoteOpen.set(true)}>+</button>
       </div>
       {#if $newNoteOpen}
         <input
           class="new-note-input"
           use:focusOnMount
           bind:value={newTitle}
-          placeholder="Note title, Enter to create"
+          placeholder={$t('sidebar.newNotePh')}
           onkeydown={onNewNoteKeydown}
           onblur={() => newNoteOpen.set(false)}
         />
@@ -89,13 +93,13 @@
           </li>
         {/each}
         {#if $noteFiles.length === 0}
-          <li class="side-empty">No notes yet</li>
+          <li class="side-empty">{$t('sidebar.noNotes')}</li>
         {/if}
       </ul>
     </section>
 
     <section class="side-section">
-      <div class="side-title">Journal</div>
+      <div class="side-title">{$t('sidebar.journal')}</div>
       <ul>
         {#each journalDays as day}
           <li>
@@ -104,7 +108,7 @@
               class:active={$currentPath === `journal/${day}.md`}
               onclick={() => onopen(`journal/${day}.md`)}
             >
-              {day === today ? `Today — ${day}` : day}
+              {dayLabel(day, $lang)}
             </button>
           </li>
         {/each}
@@ -112,11 +116,11 @@
     </section>
 
     <section class="side-section">
-      <div class="side-title">Ideas</div>
+      <div class="side-title">{$t('sidebar.ideas')}</div>
       <ul>
         <li>
           <button class="side-item" class:active={$currentPath === 'ideas'} onclick={() => onopen('ideas')}>
-            Idea stream
+            {$t('sidebar.ideaStream')}
           </button>
         </li>
       </ul>
@@ -124,12 +128,16 @@
   </nav>
 
   <div class="side-foot">
-    <button class="foot-btn" onclick={() => theme.update((t) => (t === 'dark' ? 'light' : 'dark'))}>
-      {$theme === 'dark' ? 'Light theme' : 'Dark theme'}
+    <button
+      class="foot-btn folder-btn"
+      class:active={$currentPath === 'folder'}
+      title={$t('folder.title')}
+      onclick={() => onopen('folder')}
+    >
+      📁 {rootName}
     </button>
-    <button class="foot-btn" title="Your folder already IS the backup — this is just extra paranoia" onclick={onexport}>
-      Export all as JSON
-    </button>
-    <p class="side-hint">Your folder is the data. Plain Markdown, no lock-in.</p>
+    <button class="foot-btn" onclick={toggleLang}>{$t('lang.switch')}</button>
+    <button class="foot-btn" onclick={onexport}>{$t('sidebar.export')}</button>
+    <p class="side-hint">{$t('sidebar.hint')}</p>
   </div>
 </aside>

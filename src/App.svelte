@@ -4,9 +4,12 @@
   import Sidebar from './lib/Sidebar.svelte'
   import DocView from './lib/DocView.svelte'
   import IdeasView from './lib/IdeasView.svelte'
+  import FolderView from './lib/FolderView.svelte'
+  import RightBar from './lib/RightBar.svelte'
+  import ConfirmDialog from './lib/ConfirmDialog.svelte'
   import Palette from './lib/palette/Palette.svelte'
   import { supportsFS, pickRootFolder, restoreRootFolder, requestRootPermission } from './lib/fs/access'
-  import { ensureStructure, listMarkdown, fileExists, writeFile, readFile } from './lib/fs/files'
+  import { ensureStructure, listMarkdown, fileExists, writeFile, readFile, deleteFile } from './lib/fs/files'
   import {
     appState,
     noteFiles,
@@ -18,8 +21,13 @@
     sidebarCollapsed,
     brainIndex,
     toast,
-    showToast
+    showToast,
+    theme,
+    font,
+    THEMES,
+    FONTS
   } from './lib/stores'
+  import { t, lang, formatDayFull } from './lib/i18n'
   import {
     buildIndex,
     loadCachedIndex,
@@ -31,6 +39,7 @@
   import type { BrainDoc } from './lib/parser/parser'
 
   let root: FileSystemDirectoryHandle | null = $state(null)
+  let confirmDelete: { path: string; title: string } | null = $state(null)
   let lastIndexJson = ''
 
   onMount(async () => {
@@ -105,11 +114,14 @@
 
   async function openPath(path: string, fallbackToToday = false) {
     const r = root!
-    if (path === 'ideas') {
-      currentPath.set('ideas')
-      try {
-        localStorage.setItem('brain:last-doc', 'ideas')
-      } catch {}
+    if (path === 'ideas' || path === 'folder') {
+      currentPath.set(path)
+      // The folder page is a utility view, not a resume target.
+      if (path === 'ideas') {
+        try {
+          localStorage.setItem('brain:last-doc', 'ideas')
+        } catch {}
+      }
       return
     }
     if (!(await fileExists(r, path))) {
@@ -150,7 +162,7 @@
     const iso = new Date().toISOString()
     await writeFile(r, `notes/${name}`, `---\ntitle: ${title}\ntype: note\ncreated: ${iso}\nupdated: ${iso}\n---\n`)
     noteFiles.update((l) => [...l, name].sort())
-    fileTitles.update((t) => ({ ...t, [`notes/${name}`]: title }))
+    fileTitles.update((titles) => ({ ...titles, [`notes/${name}`]: title }))
     await openPath(`notes/${name}`)
   }
 
@@ -159,7 +171,7 @@
     loadCachedIndex(r).then((idx) => {
       if (idx && !get(brainIndex)) {
         brainIndex.set(idx)
-        fileTitles.update((t) => ({ ...idx.titles, ...t }))
+        fileTitles.update((titles) => ({ ...idx.titles, ...titles }))
         lastIndexJson = JSON.stringify(idx)
       }
     })
@@ -181,11 +193,90 @@
     const index: BrainIndex = get(brainIndex) ?? emptyIndex()
     indexFile(index, path, doc)
     brainIndex.set(index)
-    fileTitles.update((t) => ({ ...t, [path]: index.titles[path] }))
+    fileTitles.update((titles) => ({ ...titles, [path]: index.titles[path] }))
     const json = JSON.stringify(index)
     if (json !== lastIndexJson && root) {
       lastIndexJson = json
       void saveIndex(root, index)
+    }
+  }
+
+  // ---------- Delete with custom confirmation ----------
+
+  function displayTitle(path: string): string {
+    if (path.startsWith('journal/')) {
+      return formatDayFull(path.split('/')[1].replace(/\.md$/, ''), get(lang))
+    }
+    return get(fileTitles)[path] ?? path.split('/').pop()!.replace(/\.md$/, '')
+  }
+
+  function requestDelete() {
+    const path = get(currentPath)
+    if (!path || path === 'ideas' || path === 'folder') return
+    confirmDelete = { path, title: displayTitle(path) }
+  }
+
+  async function confirmDeleteNow() {
+    if (!confirmDelete || !root) return
+    const { path } = confirmDelete
+    confirmDelete = null
+    await deleteFile(root, path)
+    if (path.startsWith('notes/')) {
+      const name = path.slice('notes/'.length)
+      noteFiles.update((l) => l.filter((n) => n !== name))
+    }
+    if (path.startsWith('journal/')) {
+      const name = path.slice('journal/'.length)
+      journalFiles.update((l) => l.filter((n) => n !== name))
+    }
+    const idx = get(brainIndex)
+    if (idx) {
+      idx.snippets = idx.snippets.filter((s) => s.file !== path)
+      delete idx.titles[path]
+      brainIndex.set(idx)
+      lastIndexJson = JSON.stringify(idx)
+      void saveIndex(root, idx)
+    }
+    fileTitles.update((titles) => {
+      const copy = { ...titles }
+      delete copy[path]
+      return copy
+    })
+    showToast(get(t)('toast.deleted'))
+    await openPath(todayJournalPath())
+  }
+
+  // ---------- Right bar actions ----------
+
+  async function downloadTxt() {
+    const path = get(currentPath)
+    if (!path || path === 'folder' || !root) return
+    const filePath = path === 'ideas' ? 'ideas/ideas.md' : path
+    const content = await readFile(root, filePath)
+    if (content == null) return
+    const base = filePath.split('/').pop()!.replace(/\.md$/, '')
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${base}.txt`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  function cycleTheme() {
+    theme.update((current) => THEMES[(THEMES.indexOf(current) + 1) % THEMES.length])
+  }
+
+  function cycleFont() {
+    font.update((current) => FONTS[(FONTS.indexOf(current) + 1) % FONTS.length])
+  }
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen()
+    } else {
+      void document.documentElement.requestFullscreen()
     }
   }
 
@@ -206,7 +297,7 @@
     a.download = `brain-export-${todayString()}.json`
     a.click()
     URL.revokeObjectURL(url)
-    showToast('Exported JSON')
+    showToast(get(t)('toast.exported'))
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -236,45 +327,57 @@
 {#if $appState === 'unsupported'}
   <div class="center-screen">
     <h1>Brain</h1>
-    <p>
-      Brain stores your notes as plain files on your disk via the File System Access API,
-      which this browser does not support. Please use Chrome or Edge.
-    </p>
+    <p>{$t('screen.unsupported')}</p>
   </div>
 {:else if $appState === 'welcome'}
   <div class="center-screen">
     <h1>Brain</h1>
-    <p>
-      Local-first notes for developers. Pick a folder — everything stays on your disk as
-      plain Markdown. No accounts, no cloud, no telemetry.
-    </p>
-    <button class="primary" onclick={chooseFolder}>Choose a folder</button>
+    <p>{$t('screen.welcome')}</p>
+    <button class="primary" onclick={chooseFolder}>{$t('screen.choose')}</button>
   </div>
 {:else if $appState === 'reconnect'}
   <div class="center-screen">
     <h1>Brain</h1>
-    <p>Permission to your notes folder expired with the browser session.</p>
-    <button class="primary" onclick={reconnect}>Reconnect folder</button>
+    <p>{$t('screen.reconnectMsg')}</p>
+    <button class="primary" onclick={reconnect}>{$t('screen.reconnect')}</button>
   </div>
 {:else if $appState === 'ready'}
   <div class="app">
     {#if !$sidebarCollapsed}
-      <Sidebar onopen={(p) => openPath(p)} oncreate={createNote} onexport={exportJson} />
+      <Sidebar rootName={root?.name ?? ''} onopen={(p) => openPath(p)} oncreate={createNote} onexport={exportJson} />
     {:else}
-      <button class="expand-btn" title="Expand sidebar" onclick={() => sidebarCollapsed.set(false)}>»</button>
+      <button class="expand-btn" title={$t('sidebar.expand')} onclick={() => sidebarCollapsed.set(false)}>»</button>
     {/if}
     <main class="main">
       {#if $currentPath === 'ideas'}
         <IdeasView root={root!} />
+      {:else if $currentPath === 'folder'}
+        <FolderView root={root!} onchangefolder={chooseFolder} />
       {:else if $currentPath}
         {#key $currentPath}
-          <DocView root={root!} path={$currentPath} onsaved={onDocSaved} />
+          <DocView root={root!} path={$currentPath} onsaved={onDocSaved} onrequestdelete={requestDelete} />
         {/key}
       {/if}
     </main>
+    <RightBar
+      ondownload={downloadTxt}
+      oncycletheme={cycleTheme}
+      oncyclefont={cycleFont}
+      onfullscreen={toggleFullscreen}
+    />
   </div>
 {/if}
 
+{#if confirmDelete}
+  <ConfirmDialog
+    title={$t('doc.deleteTitle')}
+    message={$t('doc.deleteMsg').replace('{name}', confirmDelete.title)}
+    confirmLabel={$t('doc.delete')}
+    cancelLabel={$t('doc.cancel')}
+    onconfirm={confirmDeleteNow}
+    oncancel={() => (confirmDelete = null)}
+  />
+{/if}
 {#if $paletteOpen}
   <Palette />
 {/if}

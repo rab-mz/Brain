@@ -2,11 +2,11 @@
 
 Local-first notes and scratchpad for developers.
 
-- **Instant like [zen](https://zen.unit.ms)** — opens in one frame. No loading screen, no network call, no login. Ever.
+- **Instant like [zen](https://zen.unit.ms)** — opens in one frame. No loading screen, no network call, no login. Ever. The whole page is one continuous writing surface: click anywhere and type.
 - **Yours like Obsidian** — plain Markdown files in a folder you pick. The folder *is* the database. Edit the files with vim, sync them with git or Dropbox, delete the app tomorrow and lose nothing.
-- **Organized like Notion, but radically simpler** — typed blocks (todos, SQL/code, text), a daily journal, an idea stream. Nothing else.
+- **Organized like Notion, but radically simpler** — live Markdown formatting (**bold**, *italic*, headings), embedded todo and SQL/code blocks, a daily journal, an idea stream. Nothing else.
 
-No backend. No accounts. No telemetry. MIT licensed.
+No backend. No accounts. No telemetry. English and Italian UI. MIT licensed.
 
 ## The killer feature
 
@@ -44,7 +44,11 @@ The snippet label and pin flag live in an HTML comment above the fence, so the f
 
 ## Browser requirements
 
-Brain uses the **File System Access API**, which currently ships in **Chrome and Edge** (desktop). Other browsers show a notice instead of a degraded experience. The folder permission is remembered; after a browser restart reconnecting is a single click.
+Brain uses the **File System Access API**, which currently ships in **Chrome and Edge** (desktop). Other browsers show a notice instead of a degraded experience. The folder permission is remembered; after a browser restart reconnecting is a single click (or zero clicks if you pick “Allow on every visit” in recent Chrome). The **Folder** page in the sidebar shows the connected folder, its permission state, and a live listing of your files.
+
+## Editing
+
+The document is a single zen-style editable page. Hover (or tap) the floating **+** to insert a todo list or a SQL/code block at the cursor; everything else is just Markdown text with live styling. Special blocks show a **×** on hover to remove them. Note titles are edited inline; the trash icon deletes the document (with a confirmation dialog). The right-edge toolbar downloads the current document as `.txt`, cycles the color theme (dark / light / sepia / ocean), cycles the document font (sans / serif / mono), and toggles full screen.
 
 ## Keyboard shortcuts
 
@@ -54,6 +58,7 @@ Brain uses the **File System Access API**, which currently ships in **Chrome and
 | `↑` `↓` / `Enter` / `Esc` | Navigate / copy / close the palette |
 | `Cmd/Ctrl + N` or `Alt + N` | New note (Chrome reserves Ctrl+N for new windows — use Alt+N there) |
 | `Cmd/Ctrl + J` | Jump to today's journal |
+| `Cmd/Ctrl + B` / `Cmd/Ctrl + I` | Bold / italic in the text editor |
 | `Enter` (in a todo) | Add a todo item below |
 | `Backspace` (on an empty todo) | Remove the item |
 | `Enter` (in the Ideas input) | Append a timestamped idea |

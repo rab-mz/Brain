@@ -5,17 +5,25 @@ export type AppState = 'loading' | 'unsupported' | 'welcome' | 'reconnect' | 're
 
 export const appState = writable<AppState>('loading')
 
-function initialTheme(): 'dark' | 'light' {
+export type ThemeName = 'dark' | 'light' | 'sepia' | 'ocean'
+export const THEMES: ThemeName[] = ['dark', 'light', 'sepia', 'ocean']
+
+/** Themes whose code blocks should use the dark CodeMirror theme. */
+export function isDarkTheme(t: ThemeName): boolean {
+  return t === 'dark' || t === 'ocean'
+}
+
+function initialTheme(): ThemeName {
   try {
     const t = localStorage.getItem('brain:theme')
-    if (t === 'light' || t === 'dark') return t
+    if ((THEMES as string[]).includes(t ?? '')) return t as ThemeName
   } catch {
     // localStorage unavailable: fall through to default.
   }
   return 'dark'
 }
 
-export const theme = writable<'dark' | 'light'>(initialTheme())
+export const theme = writable<ThemeName>(initialTheme())
 theme.subscribe((t) => {
   try {
     localStorage.setItem('brain:theme', t)
@@ -23,6 +31,29 @@ theme.subscribe((t) => {
     // Ignore: theme just won't persist.
   }
   if (typeof document !== 'undefined') document.documentElement.dataset.theme = t
+})
+
+export type FontName = 'sans' | 'serif' | 'mono'
+export const FONTS: FontName[] = ['sans', 'serif', 'mono']
+
+function initialFont(): FontName {
+  try {
+    const f = localStorage.getItem('brain:font')
+    if ((FONTS as string[]).includes(f ?? '')) return f as FontName
+  } catch {
+    // Fall through.
+  }
+  return 'sans'
+}
+
+export const font = writable<FontName>(initialFont())
+font.subscribe((f) => {
+  try {
+    localStorage.setItem('brain:font', f)
+  } catch {
+    // Ignore.
+  }
+  if (typeof document !== 'undefined') document.documentElement.dataset.font = f
 })
 
 export const sidebarCollapsed = writable(false)
@@ -34,7 +65,7 @@ export const journalFiles = writable<string[]>([])
 /** path -> title from frontmatter, filled in by the background index. */
 export const fileTitles = writable<Record<string, string>>({})
 
-/** 'notes/x.md' | 'journal/YYYY-MM-DD.md' | 'ideas' | null while booting. */
+/** 'notes/x.md' | 'journal/YYYY-MM-DD.md' | 'ideas' | 'folder' | null while booting. */
 export const currentPath = writable<string | null>(null)
 
 export const paletteOpen = writable(false)
