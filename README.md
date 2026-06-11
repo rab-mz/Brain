@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="public/og-image.png" alt="Brain — local-first notes and scratchpad for developers" width="640">
+</p>
+
 # Brain
 
 Local-first notes and scratchpad for developers.
