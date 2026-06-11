@@ -172,7 +172,21 @@
     scheduleSave()
   }
 
+  // Distinguish clicks from selection drags: a drag that ends on the page
+  // background fires a click on the common ancestor, and focusing then
+  // would collapse the selection the user just made.
+  let pointerDownPos: { x: number; y: number } | null = null
+  function onPointerDown(e: PointerEvent) {
+    pointerDownPos = { x: e.clientX, y: e.clientY }
+  }
+  function wasDrag(e: MouseEvent): boolean {
+    return (
+      pointerDownPos != null && Math.hypot(e.clientX - pointerDownPos.x, e.clientY - pointerDownPos.y) > 6
+    )
+  }
+
   function onBackgroundClick(e: MouseEvent) {
+    if (wasDrag(e)) return
     if ((e.target as HTMLElement).closest('.block, .doc-head, .float-plus')) return
     if (!doc) return
     const last = doc.blocks[doc.blocks.length - 1]
@@ -190,7 +204,7 @@
 
 {#if doc}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <article class="doc-outer" onclick={onBackgroundClick}>
+  <article class="doc-outer" onpointerdown={onPointerDown} onclick={onBackgroundClick}>
     <div class="doc-inner">
       <div class="doc-head">
         {#if isJournal}

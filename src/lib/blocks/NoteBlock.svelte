@@ -56,9 +56,21 @@
 
   onDestroy(() => api?.destroy())
 
+  // Distinguish clicks from selection drags: releasing the mouse outside
+  // the text after dragging fires a click too, and placing the caret then
+  // would collapse the selection the user just made.
+  let downPos: { x: number; y: number } | null = null
+  function onPointerDown(e: PointerEvent) {
+    downPos = { x: e.clientX, y: e.clientY }
+  }
+  function wasDrag(e: MouseEvent): boolean {
+    return downPos != null && Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y) > 6
+  }
+
   // Clicks on the wrapper's dead space (padding, area beside short lines)
   // still place the caret at the nearest position.
   function onClick(e: MouseEvent) {
+    if (wasDrag(e)) return
     if ((e.target as HTMLElement).closest('.cm-content')) return
     if (api) {
       api.focusAt(e.clientX, e.clientY)
@@ -69,7 +81,7 @@
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-<div class="note-wrap" class:grow onclick={onClick}>
+<div class="note-wrap" class:grow onpointerdown={onPointerDown} onclick={onClick}>
   <div class="note-host" bind:this={host}>
     {#if !api}
       <pre class="note-fallback">{block.text}</pre>
