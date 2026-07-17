@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
   import { parseDocument, serializeDocument, type BrainDoc, type Block } from './parser/parser'
-  import { readFile, writeFile } from './fs/files'
+  import { readFile, writeFile, readFileBlob, fileExists, normalizePath, ASSETS_DIR } from './fs/files'
   import { sidebarCollapsed } from './stores'
   import { t, lang, formatDayFull } from './i18n'
   import TodoBlock from './blocks/TodoBlock.svelte'
@@ -29,6 +29,8 @@
   const isJournal = path.startsWith('journal/')
   const journalDay = isJournal ? path.split('/')[1].replace(/\.md$/, '') : ''
   const baseName = path.split('/').pop()!.replace(/\.md$/, '')
+  /** Directory of this document; image links are relative to it. */
+  const docDir = path.split('/').slice(0, -1).join('/')
 
   // Stable identities for keyed {#each} so CodeMirror instances survive
   // inserts/removals of sibling blocks.
@@ -137,7 +139,98 @@
 
   onDestroy(() => {
     if (saveTimer) void saveNow()
+    for (const url of imageUrls.values()) URL.revokeObjectURL(url)
   })
+
+  // ---------- Images: relative paths on disk, blob URLs in the editor ----------
+
+  const imageUrls = new Map<string, string>()
+
+  async function resolveImage(src: string): Promise<string | null> {
+    const imgPath = normalizePath(docDir + '/' + decodeURI(src))
+    const cached = imageUrls.get(imgPath)
+    if (cached) return cached
+    const blob = await readFileBlob(root, imgPath)
+    if (!blob) return null
+    const url = URL.createObjectURL(blob)
+    imageUrls.set(imgPath, url)
+    return url
+  }
+
+  function sanitizeImageName(name: string): string {
+    const dot = name.lastIndexOf('.')
+    const ext = dot > 0 ? name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '') : 'png'
+    const base =
+      name
+        .slice(0, dot > 0 ? dot : undefined)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '') || 'image'
+    return `${base}.${ext}`
+  }
+
+  /** Save a dropped image next to the document and return its relative link. */
+  async function saveImage(file: File): Promise<string> {
+    const clean = sanitizeImageName(file.name)
+    const dot = clean.lastIndexOf('.')
+    let name = clean
+    let n = 2
+    while (await fileExists(root, `${docDir}/${ASSETS_DIR}/${name}`)) {
+      name = `${clean.slice(0, dot)}-${n++}${clean.slice(dot)}`
+    }
+    await writeFile(root, `${docDir}/${ASSETS_DIR}/${name}`, file)
+    return `${ASSETS_DIR}/${name}`
+  }
+
+  let dragOver = $state(false)
+
+  function hasImageFiles(e: DragEvent): boolean {
+    return [...(e.dataTransfer?.items ?? [])].some((i) => i.kind === 'file' && i.type.startsWith('image/'))
+  }
+
+  function onDragOver(e: DragEvent) {
+    if (!hasImageFiles(e)) return
+    e.preventDefault()
+    dragOver = true
+  }
+
+  async function onDrop(e: DragEvent) {
+    dragOver = false
+    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith('image/'))
+    if (files.length === 0 || !doc) return
+    e.preventDefault()
+    for (const file of files) {
+      const rel = await saveImage(file)
+      insertImageMarkdown(e.clientX, e.clientY, `![${file.name}](${rel})`)
+    }
+    scheduleSave()
+  }
+
+  /** Insert the image link in the note under the drop point (or the last one). */
+  function insertImageMarkdown(x: number, y: number, md: string) {
+    if (!doc) return
+    const el = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest('.block[data-bid]')
+    let target: Block | null = null
+    if (el instanceof HTMLElement) {
+      const bid = Number(el.dataset.bid)
+      target = doc.blocks.find((b) => b.type === 'note' && idOf(b) === bid) ?? null
+    }
+    if (!target) {
+      const last = doc.blocks[doc.blocks.length - 1]
+      target = last?.type === 'note' ? last : null
+    }
+    if (!target) {
+      doc.blocks.push({ type: 'note', text: md })
+      return
+    }
+    const api = noteApis.get(target)
+    if (api) {
+      api.insertBlockAt(x, y, md)
+    } else {
+      const note = target as Extract<Block, { type: 'note' }>
+      note.text = note.text === '' ? md : note.text + '\n\n' + md
+    }
+  }
 
   function makeSpecial(kind: 'todo' | 'sql' | 'code'): Block {
     if (kind === 'todo') return { type: 'todo', items: [{ done: false, text: '' }] }
@@ -204,7 +297,15 @@
 
 {#if doc}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <article class="doc-outer" onpointerdown={onPointerDown} onclick={onBackgroundClick}>
+  <article
+    class="doc-outer"
+    class:drag-over={dragOver}
+    onpointerdown={onPointerDown}
+    onclick={onBackgroundClick}
+    ondragover={onDragOver}
+    ondragleave={() => (dragOver = false)}
+    ondrop={onDrop}
+  >
     <div class="doc-inner">
       <div class="doc-head">
         {#if isJournal}
@@ -221,7 +322,7 @@
       </div>
 
       {#each doc.blocks as block, i (idOf(block))}
-        <div class="block" class:block-special={block.type !== 'note'}>
+        <div class="block" class:block-special={block.type !== 'note'} data-bid={idOf(block)}>
           {#if block.type === 'todo'}
             <TodoBlock {block} onedit={scheduleSave} />
           {:else if block.type === 'code'}
@@ -230,6 +331,7 @@
             <NoteBlock
               {block}
               grow={i === doc.blocks.length - 1}
+              resolveimage={resolveImage}
               onedit={scheduleSave}
               onready={onNoteReady}
               onactive={onNoteActive}

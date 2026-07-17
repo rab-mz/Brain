@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { listMarkdown, fileExists } from './fs/files'
+  import { listMarkdown, listNotesTree, fileExists } from './fs/files'
   import { t } from './i18n'
 
   let {
@@ -22,7 +22,12 @@
       // Leave 'prompt'.
     }
     const out: Array<{ folder: string; files: string[] }> = []
-    for (const folder of ['notes', 'journal', 'ideas']) {
+    const tree = await listNotesTree(root)
+    out.push({
+      folder: 'notes',
+      files: [...tree.files.sort(), ...tree.folders.flatMap((f) => f.files.sort().map((n) => `${f.name}/${n}`))]
+    })
+    for (const folder of ['journal', 'ideas']) {
       out.push({ folder, files: (await listMarkdown(root, folder)).sort() })
     }
     listing = out

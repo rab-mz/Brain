@@ -1,17 +1,20 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
   import type { Block } from '../parser/parser'
-  import type { NoteEditor } from './editor'
+  import { hideMarkup } from '../stores'
+  import type { NoteEditor, ImageResolver } from './editor'
 
   let {
     block,
     grow = false,
+    resolveimage,
     onedit,
     onready,
     onactive
   }: {
     block: Extract<Block, { type: 'note' }>
     grow?: boolean
+    resolveimage: ImageResolver
     onedit: () => void
     onready: (block: object, api: NoteEditor) => void
     onactive: (block: object) => void
@@ -32,6 +35,8 @@
     import('./editor').then(async (mod) => {
       const created = await mod.createNoteEditor(target, {
         text: block.text,
+        hideMarkup: $hideMarkup,
+        resolveImage: resolveimage,
         onChange: (text) => {
           block.text = text
           onedit()
@@ -55,6 +60,12 @@
   })
 
   onDestroy(() => api?.destroy())
+
+  // Live toggle from the right bar.
+  $effect(() => {
+    const hide = $hideMarkup
+    api?.setHideMarkup(hide)
+  })
 
   // Distinguish clicks from selection drags: releasing the mouse outside
   // the text after dragging fires a click too, and placing the caret then

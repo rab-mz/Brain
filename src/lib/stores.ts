@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store'
 import type { BrainIndex } from './palette/snippets'
+import type { NoteTree } from './fs/files'
 
 export type AppState = 'loading' | 'unsupported' | 'welcome' | 'reconnect' | 'ready'
 
@@ -58,9 +59,27 @@ font.subscribe((f) => {
 
 export const sidebarCollapsed = writable(false)
 
-/** File names (not paths) inside notes/ and journal/. */
-export const noteFiles = writable<string[]>([])
+/** notes/ listing with one level of user folders, in the user's manual order. */
+export const noteTree = writable<NoteTree>({ files: [], folders: [] })
+/** File names (not paths) inside journal/. */
 export const journalFiles = writable<string[]>([])
+
+/** Hide markdown formatting characters (#, **, *…) while reading. */
+function initialHideMarkup(): boolean {
+  try {
+    return localStorage.getItem('brain:hide-markup') === '1'
+  } catch {
+    return false
+  }
+}
+export const hideMarkup = writable<boolean>(initialHideMarkup())
+hideMarkup.subscribe((v) => {
+  try {
+    localStorage.setItem('brain:hide-markup', v ? '1' : '0')
+  } catch {
+    // Ignore: preference just won't persist.
+  }
+})
 
 /** path -> title from frontmatter, filled in by the background index. */
 export const fileTitles = writable<Record<string, string>>({})

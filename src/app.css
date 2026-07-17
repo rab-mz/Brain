@@ -220,11 +220,14 @@ textarea {
   text-overflow: ellipsis;
 }
 
+/* Hover is deliberately softer than the active item, so the two stay
+   distinguishable when they end up adjacent. */
 .side-item:hover {
-  background: var(--bg3);
+  background: color-mix(in srgb, var(--bg3) 45%, transparent);
 }
 
-.side-item.active {
+.side-item.active,
+.side-item.active:hover {
   background: var(--bg3);
   color: var(--accent);
 }
@@ -234,6 +237,56 @@ textarea {
   font-size: 13px;
   padding: 4px 8px;
   list-style: none;
+}
+
+.title-actions {
+  display: flex;
+  gap: 2px;
+}
+
+/* Collapsible groups: note folders, journal months and years. */
+.side-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-weight: 600;
+}
+
+.chev {
+  color: var(--muted);
+  font-size: 10px;
+  width: 10px;
+  flex-shrink: 0;
+}
+
+.group-icon {
+  font-size: 12px;
+}
+
+.group-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.side-nested {
+  padding-left: 14px !important;
+}
+
+/* Drag & drop targets */
+.side-item.drop-before {
+  box-shadow: 0 -2px 0 0 var(--accent);
+  /* Straight insert line: shadows bend around rounded corners. */
+  border-radius: 0;
+}
+
+.side-item.drop-into,
+.side-section.drop-into {
+  outline: 1.5px dashed var(--accent);
+  outline-offset: -1.5px;
+  /* Square corners: the outline follows the element's radius otherwise. */
+  border-radius: 0;
 }
 
 .new-note-input {
@@ -443,6 +496,26 @@ textarea {
 .note-wrap.grow .cm-content {
   flex: 1;
   min-height: 40vh;
+}
+
+/* Inline images rendered from ![alt](src) */
+.cm-image-widget img {
+  display: block;
+  max-width: 100%;
+  max-height: 480px;
+  border-radius: 8px;
+  margin: 6px 0;
+}
+
+.cm-image-widget.cm-image-missing::after {
+  content: '🖼 ?';
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.doc-outer.drag-over {
+  outline: 2px dashed var(--accent);
+  outline-offset: -6px;
 }
 
 .note-fallback {
@@ -786,6 +859,12 @@ textarea {
 .right-bar .font-btn {
   font-family: var(--doc-font);
   font-weight: 700;
+}
+
+/* Markup visibility toggle: lit up while formatting is hidden. */
+.right-bar .markup-btn.on {
+  color: var(--accent);
+  background: var(--bg2);
 }
 
 /* ---------- Modal ---------- */

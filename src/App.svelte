@@ -9,10 +9,21 @@
   import ConfirmDialog from './lib/ConfirmDialog.svelte'
   import Palette from './lib/palette/Palette.svelte'
   import { supportsFS, pickRootFolder, restoreRootFolder, requestRootPermission } from './lib/fs/access'
-  import { ensureStructure, listMarkdown, fileExists, writeFile, readFile, deleteFile } from './lib/fs/files'
+  import {
+    ensureStructure,
+    listMarkdown,
+    listNotesTree,
+    createFolder,
+    moveNoteWithAssets,
+    fileExists,
+    writeFile,
+    readFile,
+    deleteFile
+  } from './lib/fs/files'
+  import { loadSidebarOrder, saveSidebarOrder, applyOrder, type SidebarOrder } from './lib/fs/sidebar-order'
   import {
     appState,
-    noteFiles,
+    noteTree,
     journalFiles,
     fileTitles,
     currentPath,
@@ -41,6 +52,7 @@
   let root: FileSystemDirectoryHandle | null = $state(null)
   let confirmDelete: { path: string; title: string } | null = $state(null)
   let lastIndexJson = ''
+  let sidebarOrder: SidebarOrder = {}
 
   onMount(async () => {
     if (!supportsFS()) {
@@ -80,13 +92,33 @@
   async function init() {
     const r = root!
     await ensureStructure(r)
-    const [notes, journal] = await Promise.all([listMarkdown(r, 'notes'), listMarkdown(r, 'journal')])
-    noteFiles.set(notes.sort())
+    const [journal, order] = await Promise.all([listMarkdown(r, 'journal'), loadSidebarOrder(r)])
+    sidebarOrder = order
+    await refreshNoteTree()
     journalFiles.set(journal)
     appState.set('ready')
     const last = safeGet('brain:last-doc')
     await openPath(last ?? todayJournalPath(), true)
     scheduleIndexLoad(r)
+  }
+
+  // Key for the folders' own order; ':' keeps it out of the directory keys.
+  const FOLDERS_ORDER_KEY = 'notes:folders'
+
+  /** Re-list notes/ from disk and apply the user's manual order. */
+  async function refreshNoteTree() {
+    const tree = await listNotesTree(root!)
+    const folderNames = applyOrder(
+      tree.folders.map((f) => f.name),
+      sidebarOrder[FOLDERS_ORDER_KEY]
+    )
+    noteTree.set({
+      files: applyOrder(tree.files, sidebarOrder['notes']),
+      folders: folderNames.map((name) => {
+        const f = tree.folders.find((t) => t.name === name)!
+        return { name, files: applyOrder(f.files, sidebarOrder[`notes/${name}`]) }
+      })
+    })
   }
 
   function safeGet(key: string): string | null {
@@ -161,9 +193,96 @@
     }
     const iso = new Date().toISOString()
     await writeFile(r, `notes/${name}`, `---\ntitle: ${title}\ntype: note\ncreated: ${iso}\nupdated: ${iso}\n---\n`)
-    noteFiles.update((l) => [...l, name].sort())
     fileTitles.update((titles) => ({ ...titles, [`notes/${name}`]: title }))
+    await refreshNoteTree()
     await openPath(`notes/${name}`)
+  }
+
+  async function createNoteFolder(name: string) {
+    const clean = name.replace(/[/\\]+/g, '-').trim()
+    if (!clean || clean === 'assets') return
+    await createFolder(root!, `notes/${clean}`)
+    await refreshNoteTree()
+  }
+
+  // ---------- Sidebar drag & drop: reorder and move between folders ----------
+
+  function orderedFilesOf(dir: string): string[] {
+    const tree = get(noteTree)
+    if (dir === 'notes') return [...tree.files]
+    const folder = tree.folders.find((f) => `notes/${f.name}` === dir)
+    return folder ? [...folder.files] : []
+  }
+
+  async function moveNote(path: string, targetDir: string, beforeName: string | null) {
+    const r = root!
+    const name = path.split('/').pop()!
+    const fromDir = path.split('/').slice(0, -1).join('/')
+
+    // Physical move when the note changes folder (images travel along).
+    let finalName = name
+    if (fromDir !== targetDir) {
+      const stem = name.replace(/\.md$/, '')
+      let n = 2
+      while (await fileExists(r, `${targetDir}/${finalName}`)) {
+        finalName = `${stem}-${n++}.md`
+      }
+      const newPath = `${targetDir}/${finalName}`
+      await moveNoteWithAssets(r, path, newPath)
+      renamePathEverywhere(path, newPath)
+    }
+
+    // Manual order: remove from the source list, insert in the target list.
+    const fromList = orderedFilesOf(fromDir).filter((f) => f !== name)
+    const targetList = fromDir === targetDir ? fromList : orderedFilesOf(targetDir).filter((f) => f !== finalName)
+    const at = beforeName ? targetList.indexOf(beforeName) : -1
+    if (at >= 0) targetList.splice(at, 0, finalName)
+    else targetList.push(finalName)
+    sidebarOrder[fromDir] = fromDir === targetDir ? targetList : fromList
+    sidebarOrder[targetDir] = targetList
+    await saveSidebarOrder(r, sidebarOrder)
+    await refreshNoteTree()
+  }
+
+  async function moveFolder(name: string, beforeName: string | null) {
+    const names = get(noteTree)
+      .folders.map((f) => f.name)
+      .filter((n) => n !== name)
+    const at = beforeName ? names.indexOf(beforeName) : -1
+    if (at >= 0) names.splice(at, 0, name)
+    else names.push(name)
+    sidebarOrder[FOLDERS_ORDER_KEY] = names
+    await saveSidebarOrder(root!, sidebarOrder)
+    await refreshNoteTree()
+  }
+
+  /** Keep titles, index and the open document pointing at a renamed path. */
+  function renamePathEverywhere(oldPath: string, newPath: string) {
+    fileTitles.update((titles) => {
+      if (!(oldPath in titles)) return titles
+      const copy = { ...titles, [newPath]: titles[oldPath] }
+      delete copy[oldPath]
+      return copy
+    })
+    const idx = get(brainIndex)
+    if (idx && root) {
+      if (idx.titles[oldPath] != null) {
+        idx.titles[newPath] = idx.titles[oldPath]
+        delete idx.titles[oldPath]
+      }
+      for (const s of idx.snippets) {
+        if (s.file === oldPath) s.file = newPath
+      }
+      brainIndex.set(idx)
+      lastIndexJson = JSON.stringify(idx)
+      void saveIndex(root, idx)
+    }
+    if (get(currentPath) === oldPath) {
+      currentPath.set(newPath)
+      try {
+        localStorage.setItem('brain:last-doc', newPath)
+      } catch {}
+    }
   }
 
   function scheduleIndexLoad(r: FileSystemDirectoryHandle) {
@@ -222,8 +341,7 @@
     confirmDelete = null
     await deleteFile(root, path)
     if (path.startsWith('notes/')) {
-      const name = path.slice('notes/'.length)
-      noteFiles.update((l) => l.filter((n) => n !== name))
+      await refreshNoteTree()
     }
     if (path.startsWith('journal/')) {
       const name = path.slice('journal/'.length)
@@ -344,7 +462,15 @@
 {:else if $appState === 'ready'}
   <div class="app">
     {#if !$sidebarCollapsed}
-      <Sidebar rootName={root?.name ?? ''} onopen={(p) => openPath(p)} oncreate={createNote} onexport={exportJson} />
+      <Sidebar
+        rootName={root?.name ?? ''}
+        onopen={(p) => openPath(p)}
+        oncreate={createNote}
+        oncreatefolder={createNoteFolder}
+        onmovenote={moveNote}
+        onmovefolder={moveFolder}
+        onexport={exportJson}
+      />
     {:else}
       <button class="expand-btn" title={$t('sidebar.expand')} onclick={() => sidebarCollapsed.set(false)}>»</button>
     {/if}

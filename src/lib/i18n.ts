@@ -32,7 +32,10 @@ const en: Record<string, string> = {
   'sidebar.today': 'Today',
   'sidebar.newNote': 'New note (Ctrl/Cmd+N or Alt+N)',
   'sidebar.newNotePh': 'Note title, Enter to create',
+  'sidebar.newFolder': 'New folder',
+  'sidebar.newFolderPh': 'Folder name, Enter to create',
   'sidebar.noNotes': 'No notes yet',
+  'sidebar.emptyFolder': 'Drag notes here',
   'sidebar.export': 'Export all as JSON',
   'sidebar.hint': 'Your folder is the data. Plain Markdown, no lock-in.',
   'sidebar.collapse': 'Collapse sidebar',
@@ -81,6 +84,8 @@ const en: Record<string, string> = {
   'bar.download': 'Download as .txt',
   'bar.theme': 'Change color theme',
   'bar.font': 'Change font',
+  'bar.hideMarkup': 'Hide markdown formatting',
+  'bar.showMarkup': 'Show markdown formatting',
   'bar.fullscreen': 'Toggle full screen',
   'toast.copied': 'Copied to clipboard',
   'toast.copyFail': 'Could not copy',
@@ -98,7 +103,10 @@ const it: Record<string, string> = {
   'sidebar.today': 'Oggi',
   'sidebar.newNote': 'Nuova nota (Ctrl/Cmd+N o Alt+N)',
   'sidebar.newNotePh': 'Titolo della nota, Invio per creare',
+  'sidebar.newFolder': 'Nuova cartella',
+  'sidebar.newFolderPh': 'Nome cartella, Invio per creare',
   'sidebar.noNotes': 'Ancora nessuna nota',
+  'sidebar.emptyFolder': 'Trascina qui le note',
   'sidebar.export': 'Esporta tutto in JSON',
   'sidebar.hint': 'La tua cartella è i tuoi dati. Markdown puro, nessun lock-in.',
   'sidebar.collapse': 'Comprimi la barra laterale',
@@ -147,6 +155,8 @@ const it: Record<string, string> = {
   'bar.download': 'Scarica come .txt',
   'bar.theme': 'Cambia tema colore',
   'bar.font': 'Cambia carattere',
+  'bar.hideMarkup': 'Nascondi la formattazione markdown',
+  'bar.showMarkup': 'Mostra la formattazione markdown',
   'bar.fullscreen': 'Schermo intero',
   'toast.copied': 'Copiato negli appunti',
   'toast.copyFail': 'Copia non riuscita',
@@ -176,6 +186,20 @@ export function formatDayFull(day: string, l: Lang): string {
   return capitalize(
     new Intl.DateTimeFormat(locale(l), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(d)
   )
+}
+
+/** "2026-06" -> "Giugno" / "June". */
+export function formatMonth(month: string, l: Lang): string {
+  const d = new Date(month + '-01T00:00:00')
+  if (isNaN(d.getTime())) return month
+  return capitalize(new Intl.DateTimeFormat(locale(l), { month: 'long' }).format(d))
+}
+
+/** Short day label for grouped journal lists: "Mercoledì 10" / "Wednesday 10". */
+export function formatDayShort(day: string, l: Lang): string {
+  const d = new Date(day + 'T00:00:00')
+  if (isNaN(d.getTime())) return day
+  return capitalize(new Intl.DateTimeFormat(locale(l), { weekday: 'long', day: 'numeric' }).format(d))
 }
 
 /** Shorter variant for lists: drops the year when it is the current one. */
