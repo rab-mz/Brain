@@ -30,6 +30,8 @@
   --accent: #7aa2f7;
   --accent-fg: #0d1117;
   --code-bg: #1a1d24;
+  --inline-code-fg: #e06c75;
+  --inline-code-bg: #262b35;
   --danger: #e06c75;
 }
 
@@ -44,6 +46,8 @@
   --accent: #2563eb;
   --accent-fg: #ffffff;
   --code-bg: #f5f5f3;
+  --inline-code-fg: #b8352f;
+  --inline-code-bg: #ecebe8;
   --danger: #c4423f;
 }
 
@@ -58,6 +62,8 @@
   --accent: #8f5e1f;
   --accent-fg: #fdf8ec;
   --code-bg: #efe5cd;
+  --inline-code-fg: #a63c28;
+  --inline-code-bg: #e9dcbc;
   --danger: #b54834;
 }
 
@@ -72,6 +78,8 @@
   --accent: #5fb3ff;
   --accent-fg: #081220;
   --code-bg: #122136;
+  --inline-code-fg: #ff7b72;
+  --inline-code-bg: #1d3049;
   --danger: #ff7b72;
 }
 
@@ -511,6 +519,31 @@ textarea {
   content: '🖼 ?';
   color: var(--muted);
   font-size: 13px;
+}
+
+/* Right-click menu on inline images */
+.cm-image-menu {
+  position: fixed;
+  z-index: 120;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 25%);
+  padding: 4px;
+}
+
+.cm-image-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.cm-image-menu button:hover {
+  background: var(--bg3);
 }
 
 .doc-outer.drag-over {

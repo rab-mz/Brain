@@ -8,6 +8,7 @@
     block,
     grow = false,
     resolveimage,
+    saveimage,
     onedit,
     onready,
     onactive
@@ -15,6 +16,7 @@
     block: Extract<Block, { type: 'note' }>
     grow?: boolean
     resolveimage: ImageResolver
+    saveimage: (file: File) => Promise<string>
     onedit: () => void
     onready: (block: object, api: NoteEditor) => void
     onactive: (block: object) => void
@@ -37,6 +39,7 @@
         text: block.text,
         hideMarkup: $hideMarkup,
         resolveImage: resolveimage,
+        saveImage: saveimage,
         onChange: (text) => {
           block.text = text
           onedit()

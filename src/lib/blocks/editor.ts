@@ -25,6 +25,9 @@ import {
 } from '@codemirror/language'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { tags } from '@lezer/highlight'
+import { get } from 'svelte/store'
+import { showToast } from '../stores'
+import { t } from '../i18n'
 
 async function languageExtension(language: string): Promise<Extension> {
   const lang = language.toLowerCase()
@@ -101,9 +104,21 @@ const markdownHighlight = HighlightStyle.define([
   { tag: tags.heading3, fontSize: '1.15em', fontWeight: '700' },
   { tag: tags.heading4, fontWeight: '700' },
   { tag: tags.strong, fontWeight: '700' },
-  { tag: tags.emphasis, fontStyle: 'italic' },
+  // Italic alone is nearly invisible in system-ui: a bit of weight makes
+  // emphasis actually stand out from the surrounding prose.
+  { tag: tags.emphasis, fontStyle: 'italic', fontWeight: '500' },
   { tag: tags.strikethrough, textDecoration: 'line-through' },
-  { tag: tags.monospace, fontFamily: MONO, fontSize: '0.9em' },
+  // `inline code` as a Slack-style pill: tinted mono text on its own
+  // background, clearly separate from prose (and from italic).
+  {
+    tag: tags.monospace,
+    fontFamily: MONO,
+    fontSize: '0.9em',
+    color: 'var(--inline-code-fg)',
+    backgroundColor: 'var(--inline-code-bg)',
+    borderRadius: '4px',
+    padding: '1px 4px'
+  },
   { tag: tags.link, color: 'var(--accent)' },
   { tag: tags.url, color: 'var(--accent)' },
   { tag: tags.quote, color: 'var(--muted)', fontStyle: 'italic' },
@@ -125,6 +140,8 @@ const noteTheme = EditorView.theme({
     caretColor: 'var(--fg)'
   },
   '.cm-line': { padding: '0' },
+  // Padding, not margin: CodeMirror measures line heights from padding-box.
+  '.cm-line.cm-heading-line': { paddingTop: '0.7em' },
   '&.cm-focused': { outline: 'none' },
   '.cm-placeholder': { color: 'var(--muted)' }
 })
@@ -135,6 +152,60 @@ const noteTheme = EditorView.theme({
 export type ImageResolver = (src: string) => Promise<string | null>
 
 const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+
+// Chrome's native "Copy image" re-fetches the src internally and silently
+// fails on blob: URLs inside contenteditable, so the widget shows its own
+// menu item and writes the clipboard through the Clipboard API instead.
+// The clipboard only accepts PNG, so other formats go through a canvas.
+function copyImage(img: HTMLImageElement): Promise<void> {
+  const png = (async () => {
+    const blob = await (await fetch(img.src)).blob()
+    if (blob.type === 'image/png') return blob
+    const bmp = await createImageBitmap(blob)
+    const canvas = new OffscreenCanvas(bmp.width, bmp.height)
+    canvas.getContext('2d')!.drawImage(bmp, 0, 0)
+    bmp.close()
+    return canvas.convertToBlob({ type: 'image/png' })
+  })()
+  // Promise-based ClipboardItem: the write starts inside the user gesture
+  // even though the PNG is still being produced.
+  return navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
+}
+
+function showImageMenu(x: number, y: number, img: HTMLImageElement): void {
+  const menu = document.createElement('div')
+  menu.className = 'cm-image-menu'
+  const item = document.createElement('button')
+  item.type = 'button'
+  item.textContent = get(t)('img.copy')
+  item.onclick = () => {
+    close()
+    copyImage(img).then(
+      () => showToast(get(t)('toast.imgCopied')),
+      () => showToast(get(t)('toast.copyFail'))
+    )
+  }
+  menu.appendChild(item)
+  const close = () => {
+    menu.remove()
+    window.removeEventListener('pointerdown', onAway, true)
+    window.removeEventListener('keydown', onKey, true)
+    window.removeEventListener('blur', close)
+  }
+  const onAway = (e: PointerEvent) => {
+    if (!menu.contains(e.target as Node)) close()
+  }
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === 'Escape') close()
+  }
+  document.body.appendChild(menu)
+  const r = menu.getBoundingClientRect()
+  menu.style.left = Math.max(0, Math.min(x, window.innerWidth - r.width - 8)) + 'px'
+  menu.style.top = Math.max(0, Math.min(y, window.innerHeight - r.height - 8)) + 'px'
+  window.addEventListener('pointerdown', onAway, true)
+  window.addEventListener('keydown', onKey, true)
+  window.addEventListener('blur', close)
+}
 
 class ImageWidget extends WidgetType {
   constructor(
@@ -164,11 +235,19 @@ class ImageWidget extends WidgetType {
       })
     }
     wrap.appendChild(img)
+    wrap.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      showImageMenu(e.clientX, e.clientY, img)
+    })
     return wrap
   }
 
-  ignoreEvent(): boolean {
-    return false
+  // Right-click must reach the <img> untouched: if CodeMirror handled it,
+  // the caret would move into the markdown, the widget would be torn down,
+  // and the native "Copy image" menu would never appear.
+  ignoreEvent(event: Event): boolean {
+    return event.type === 'contextmenu' || (event instanceof MouseEvent && event.button === 2)
   }
 }
 
@@ -184,24 +263,28 @@ function touchesSelection(lines: Array<{ from: number; to: number }>, from: numb
   return lines.some((l) => from <= l.to && to >= l.from)
 }
 
-/** Render `![alt](src)` as the actual image, except on the line being edited. */
+/**
+ * Render `![alt](src)` as the actual image. The raw markdown shows only
+ * while the selection is strictly inside it (arrow keys / drag-select into
+ * it), NOT whenever the caret is merely on the same line — otherwise a note
+ * whose only content is an image could never show it.
+ */
 function imagePlugin(resolve: ImageResolver): Extension {
   const build = (view: EditorView): DecorationSet => {
     const builder = new RangeSetBuilder<Decoration>()
-    const active = selectionLines(view)
+    const sel = view.state.selection.ranges
+    const selectionInside = (from: number, to: number) => sel.some((r) => r.from < to && r.to > from)
     for (const range of view.visibleRanges) {
       let pos = range.from
       while (pos <= range.to) {
         const line = view.state.doc.lineAt(pos)
-        if (!touchesSelection(active, line.from, line.to)) {
-          IMAGE_RE.lastIndex = 0
-          let m: RegExpExecArray | null
-          while ((m = IMAGE_RE.exec(line.text))) {
-            builder.add(
-              line.from + m.index,
-              line.from + m.index + m[0].length,
-              Decoration.replace({ widget: new ImageWidget(m[2], m[1], resolve) })
-            )
+        IMAGE_RE.lastIndex = 0
+        let m: RegExpExecArray | null
+        while ((m = IMAGE_RE.exec(line.text))) {
+          const from = line.from + m.index
+          const to = from + m[0].length
+          if (!selectionInside(from, to)) {
+            builder.add(from, to, Decoration.replace({ widget: new ImageWidget(m[2], m[1], resolve) }))
           }
         }
         pos = line.to + 1
@@ -215,6 +298,44 @@ function imagePlugin(resolve: ImageResolver): Extension {
       decorations: build(view),
       update(this: { decorations: DecorationSet }, update: ViewUpdate) {
         if (update.docChanged || update.selectionSet || update.viewportChanged) {
+          this.decorations = build(update.view)
+        }
+      }
+    }),
+    { decorations: (v) => v.decorations }
+  )
+}
+
+// ---------- Heading spacing ----------
+
+const HEADING_NODE = /^(ATXHeading[1-6]|SetextHeading[12])$/
+
+/** Headings get breathing room above, so sections read as paragraphs. */
+function headingSpacingPlugin(): Extension {
+  const build = (view: EditorView): DecorationSet => {
+    const builder = new RangeSetBuilder<Decoration>()
+    const seen = new Set<number>()
+    for (const range of view.visibleRanges) {
+      syntaxTree(view.state).iterate({
+        from: range.from,
+        to: range.to,
+        enter(node) {
+          if (!HEADING_NODE.test(node.name)) return
+          const line = view.state.doc.lineAt(node.from)
+          if (line.from === 0 || seen.has(line.from)) return
+          seen.add(line.from)
+          builder.add(line.from, line.from, Decoration.line({ class: 'cm-heading-line' }))
+        }
+      })
+    }
+    return builder.finish()
+  }
+
+  return ViewPlugin.define(
+    (view) => ({
+      decorations: build(view),
+      update(this: { decorations: DecorationSet }, update: ViewUpdate) {
+        if (update.docChanged || update.viewportChanged) {
           this.decorations = build(update.view)
         }
       }
@@ -315,6 +436,8 @@ export async function createNoteEditor(
     text: string
     hideMarkup: boolean
     resolveImage: ImageResolver
+    /** Persist a pasted image and return the relative markdown src. */
+    saveImage(file: File): Promise<string>
     onChange(text: string): void
     onFocus(): void
   }
@@ -342,7 +465,30 @@ export async function createNoteEditor(
         ]),
         markdown(),
         syntaxHighlighting(markdownHighlight),
+        headingSpacingPlugin(),
         imagePlugin(opts.resolveImage),
+        // Pasting an image (screenshot, copied image) saves it next to the
+        // document and inserts its markdown link at the caret.
+        EditorView.domEventHandlers({
+          paste: (event, v) => {
+            const files = [...(event.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
+            if (files.length === 0) return false
+            event.preventDefault()
+            void (async () => {
+              for (const file of files) {
+                const rel = await opts.saveImage(file)
+                const pos = v.state.selection.main.head
+                const md = `![${file.name}](${rel})`
+                v.dispatch({
+                  changes: { from: pos, insert: md },
+                  selection: { anchor: pos + md.length },
+                  scrollIntoView: true
+                })
+              }
+            })()
+            return true
+          }
+        }),
         markupCompartment.of(opts.hideMarkup ? hideMarkupPlugin() : []),
         noteTheme,
         EditorView.updateListener.of((update) => {

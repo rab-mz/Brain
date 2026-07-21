@@ -332,6 +332,7 @@
               {block}
               grow={i === doc.blocks.length - 1}
               resolveimage={resolveImage}
+              saveimage={saveImage}
               onedit={scheduleSave}
               onready={onNoteReady}
               onactive={onNoteActive}
