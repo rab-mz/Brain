@@ -2,6 +2,7 @@
   import { onMount } from 'svelte'
   import { listMarkdown, listNotesTree, fileExists } from './fs/files'
   import { t } from './i18n'
+  import FolderIcon from './FolderIcon.svelte'
 
   let {
     root,
@@ -41,7 +42,7 @@
   <div class="folder-card">
     <div class="folder-row">
       <span class="folder-key">{$t('folder.connected')}</span>
-      <span class="folder-name">📁 {root.name}</span>
+      <span class="folder-name"><FolderIcon /> {root.name}</span>
     </div>
     <div class="folder-row">
       <span class="folder-key">{$t('folder.permission')}</span>

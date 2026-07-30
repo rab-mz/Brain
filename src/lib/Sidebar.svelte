@@ -2,6 +2,7 @@
   import { noteTree, journalFiles, fileTitles, currentPath, sidebarCollapsed, newNoteOpen } from './stores'
   import { t, lang, formatDayList, formatDayShort, formatMonth, type Lang } from './i18n'
   import { focusOnMount } from './actions'
+  import FolderIcon from './FolderIcon.svelte'
 
   let {
     rootName,
@@ -277,8 +278,10 @@
       <div class="side-title">
         {$t('sidebar.notes')}
         <span class="title-actions">
-          <button class="icon-btn" title={$t('sidebar.newFolder')} onclick={() => (newFolderOpen = true)}>⊞</button>
-          <button class="icon-btn" title={$t('sidebar.newNote')} onclick={() => newNoteOpen.set(true)}>+</button>
+          <button class="icon-btn" data-tip={$t('sidebar.newFolder')} onclick={() => (newFolderOpen = true)}>
+            <FolderIcon plus />
+          </button>
+          <button class="icon-btn" data-tip={$t('sidebar.newNote')} onclick={() => newNoteOpen.set(true)}>+</button>
         </span>
       </div>
       {#if newFolderOpen}
@@ -317,7 +320,7 @@
               ondrop={(e) => onFolderHeaderDrop(e, folder.name, dir)}
             >
               <span class="chev">{isOpen(`folder:${folder.name}`) ? '▾' : '▸'}</span>
-              <span class="group-icon">🗀</span>
+              <FolderIcon />
               {folder.name}
               <span class="group-count">{folder.files.length}</span>
             </button>
@@ -427,7 +430,8 @@
       title={$t('folder.title')}
       onclick={() => onopen('folder')}
     >
-      📁 {rootName}
+      <FolderIcon />
+      {rootName}
     </button>
     <button class="foot-btn" onclick={toggleLang}>{$t('lang.switch')}</button>
     <button class="foot-btn" onclick={onexport}>{$t('sidebar.export')}</button>

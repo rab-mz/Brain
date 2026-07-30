@@ -268,7 +268,12 @@ textarea {
 }
 
 .group-icon {
-  font-size: 12px;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  color: var(--muted);
+  /* In text-flow contexts (foot button, folder card) sit on the baseline. */
+  vertical-align: -2px;
 }
 
 .group-count {
@@ -425,11 +430,9 @@ textarea {
 }
 
 .doc-delete {
-  font-size: 15px;
   opacity: 0;
   padding: 4px 8px;
   border-radius: 6px;
-  filter: grayscale(1);
   transition: opacity 0.12s;
 }
 
@@ -550,9 +553,12 @@ textarea {
 }
 
 .cm-image-widget.cm-image-missing::after {
-  content: '🖼 ?';
+  content: '?';
   color: var(--muted);
   font-size: 13px;
+  padding: 1px 7px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
 }
 
 /* Inline videos: same ![alt](src) syntax, rendered as a player */
@@ -566,9 +572,12 @@ textarea {
 }
 
 .cm-video-widget.cm-video-missing::after {
-  content: '🎬 ?';
+  content: '?';
   color: var(--muted);
   font-size: 13px;
+  padding: 1px 7px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
 }
 
 /* Right-click menu on inline images */
@@ -966,6 +975,40 @@ textarea {
   right: calc(100% + 8px);
   top: 50%;
   transform: translateY(-50%);
+  background: var(--bg2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 20%);
+}
+
+/* Same instant tooltip for sidebar icon buttons and the trash button,
+   dropping below (they sit at the top/left edge of the window). */
+.icon-btn[data-tip],
+.doc-delete[data-tip] {
+  position: relative;
+}
+
+.doc-delete svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+
+.icon-btn[data-tip]:hover::after,
+.doc-delete[data-tip]:hover::after {
+  content: attr(data-tip);
+  /* fixed with auto offsets keeps the static position (just under the
+     button) but escapes the .side-scroll overflow clipping that was
+     covering the tooltip. */
+  position: fixed;
+  display: block;
+  margin-top: 6px;
+  z-index: 120;
   background: var(--bg2);
   color: var(--fg);
   border: 1px solid var(--border);

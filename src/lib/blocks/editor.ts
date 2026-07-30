@@ -578,7 +578,10 @@ export async function createNoteEditor(
           ...defaultKeymap,
           ...historyKeymap
         ]),
-        markdown(),
+        // Setext headings removed: a `-----` right under a paragraph would
+        // silently promote it to a chapter title, but here dashes are used
+        // as visual separators and headings are always written with `#`.
+        markdown({ extensions: { remove: ['SetextHeading'] } }),
         syntaxHighlighting(markdownHighlight),
         headingSpacingPlugin(),
         imagePlugin(opts.resolveImage),

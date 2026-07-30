@@ -325,7 +325,11 @@
             oninput={onTitleInput}
           />
         {/if}
-        <button class="doc-delete" title={$t('doc.deleteTooltip')} onclick={onrequestdelete}>🗑</button>
+        <button class="doc-delete" data-tip={$t('doc.deleteTooltip')} onclick={onrequestdelete}>
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9.5h6.6L12 4M6.5 6.5v4.5M9.5 6.5v4.5" />
+          </svg>
+        </button>
       </div>
 
       {#each doc.blocks as block, i (idOf(block))}
