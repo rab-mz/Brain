@@ -14,6 +14,8 @@
     listMarkdown,
     listNotesTree,
     createFolder,
+    renameFolder,
+    folderExists,
     moveNoteWithAssets,
     fileExists,
     writeFile,
@@ -203,6 +205,41 @@
     if (!clean || clean === 'assets') return
     await createFolder(root!, `notes/${clean}`)
     await refreshNoteTree()
+  }
+
+  /** Rename a notes/ subfolder, carrying manual order, titles and index along. */
+  async function renameNoteFolder(oldName: string, newName: string) {
+    const clean = newName.replace(/[/\\]+/g, '-').trim()
+    if (!clean || clean === 'assets' || clean === oldName) return
+    const r = root!
+    if (await folderExists(r, `notes/${clean}`)) {
+      showToast(get(t)('folder.exists'))
+      return
+    }
+    const folder = get(noteTree).folders.find((f) => f.name === oldName)
+    await renameFolder(r, `notes/${oldName}`, clean)
+    if (sidebarOrder[`notes/${oldName}`]) {
+      sidebarOrder[`notes/${clean}`] = sidebarOrder[`notes/${oldName}`]
+      delete sidebarOrder[`notes/${oldName}`]
+    }
+    const folderOrder = sidebarOrder[FOLDERS_ORDER_KEY]
+    if (folderOrder) {
+      sidebarOrder[FOLDERS_ORDER_KEY] = folderOrder.map((n) => (n === oldName ? clean : n))
+    }
+    await saveSidebarOrder(r, sidebarOrder)
+    for (const file of folder?.files ?? []) {
+      renamePathEverywhere(`notes/${oldName}/${file}`, `notes/${clean}/${file}`)
+    }
+    // The resume target may point into the renamed folder (this page is
+    // open instead of a document, so renamePathEverywhere can't catch it).
+    const last = safeGet('brain:last-doc')
+    if (last?.startsWith(`notes/${oldName}/`)) {
+      try {
+        localStorage.setItem('brain:last-doc', `notes/${clean}/` + last.slice(`notes/${oldName}/`.length))
+      } catch {}
+    }
+    await refreshNoteTree()
+    showToast(get(t)('toast.renamed'))
   }
 
   // ---------- Sidebar drag & drop: reorder and move between folders ----------
@@ -478,7 +515,7 @@
       {#if $currentPath === 'ideas'}
         <IdeasView root={root!} />
       {:else if $currentPath === 'folder'}
-        <FolderView root={root!} onchangefolder={chooseFolder} />
+        <FolderView root={root!} onchangefolder={chooseFolder} onrenamefolder={renameNoteFolder} />
       {:else if $currentPath}
         {#key $currentPath}
           <DocView root={root!} path={$currentPath} onsaved={onDocSaved} onrequestdelete={requestDelete} />

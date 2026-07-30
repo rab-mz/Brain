@@ -185,3 +185,42 @@ export async function createFolder(root: FileSystemDirectoryHandle, path: string
     dir = await dir.getDirectoryHandle(part, { create: true })
   }
 }
+
+export async function folderExists(root: FileSystemDirectoryHandle, path: string): Promise<boolean> {
+  try {
+    const { dir, name } = await resolveDir(root, path)
+    await dir.getDirectoryHandle(name)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function copyDirRecursive(from: FileSystemDirectoryHandle, to: FileSystemDirectoryHandle): Promise<void> {
+  for await (const entry of from.values()) {
+    if (entry.kind === 'file') {
+      const file = await (entry as FileSystemFileHandle).getFile()
+      const target = await to.getFileHandle(entry.name, { create: true })
+      const writable = await target.createWritable()
+      await writable.write(file)
+      await writable.close()
+    } else {
+      const sub = await to.getDirectoryHandle(entry.name, { create: true })
+      await copyDirRecursive(entry as FileSystemDirectoryHandle, sub)
+    }
+  }
+}
+
+/**
+ * Rename a directory in place. The File System Access API has no move()
+ * for directories, so this copies the whole tree (files and subfolders,
+ * assets included) into the new name and then deletes the old one.
+ */
+export async function renameFolder(root: FileSystemDirectoryHandle, path: string, newName: string): Promise<void> {
+  const { dir, name } = await resolveDir(root, path)
+  if (name === newName) return
+  const from = await dir.getDirectoryHandle(name)
+  const to = await dir.getDirectoryHandle(newName, { create: true })
+  await copyDirRecursive(from, to)
+  await dir.removeEntry(name, { recursive: true })
+}

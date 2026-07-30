@@ -1014,6 +1014,57 @@ textarea {
   margin: 14px 0 0;
 }
 
+/* Subfolder rows on the folder page: name + pencil, or an inline input
+   while renaming. The pencil shows on hover to keep the list calm. */
+.folder-sub-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+}
+
+.folder-sub-row .folder-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.folder-rename-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 6px;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.folder-sub-row:hover .folder-rename-btn {
+  opacity: 1;
+}
+
+.folder-rename-btn:hover {
+  color: var(--fg);
+  background: var(--bg3);
+}
+
+.folder-rename-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.folder-rename-input {
+  font: inherit;
+  font-weight: 600;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 3px 8px;
+  outline: none;
+  min-width: 220px;
+}
+
 .folder-live {
   color: var(--muted);
   font-size: 12px;
@@ -1125,7 +1176,8 @@ textarea {
 /* Same instant tooltip for sidebar icon buttons and the trash button,
    dropping below (they sit at the top/left edge of the window). */
 .icon-btn[data-tip],
-.doc-delete[data-tip] {
+.doc-delete[data-tip],
+.folder-rename-btn[data-tip] {
   position: relative;
 }
 
@@ -1136,7 +1188,8 @@ textarea {
 }
 
 .icon-btn[data-tip]:hover::after,
-.doc-delete[data-tip]:hover::after {
+.doc-delete[data-tip]:hover::after,
+.folder-rename-btn[data-tip]:hover::after {
   content: attr(data-tip);
   /* fixed with auto offsets keeps the static position (just under the
      button) but escapes the .side-scroll overflow clipping that was
