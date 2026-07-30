@@ -153,6 +153,16 @@ export type ImageResolver = (src: string) => Promise<string | null>
 
 const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
 
+// Video files reuse the ![alt](src) image syntax — the extension decides
+// which widget renders, so the markdown stays readable outside the app.
+const VIDEO_SRC_RE = /\.(mp4|mov|m4v|webm)$/i
+
+/** Media (image or video) accepted by paste/drop. Some .mov drags arrive
+ *  with an empty MIME type, so the filename extension is the fallback. */
+export function isMediaFile(file: File): boolean {
+  return file.type.startsWith('image/') || file.type.startsWith('video/') || VIDEO_SRC_RE.test(file.name)
+}
+
 // Chrome's native "Copy image" re-fetches the src internally and silently
 // fails on blob: URLs inside contenteditable, so the widget shows its own
 // menu item and writes the clipboard through the Clipboard API instead.
@@ -172,20 +182,19 @@ function copyImage(img: HTMLImageElement): Promise<void> {
   return navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
 }
 
-function showImageMenu(x: number, y: number, img: HTMLImageElement): void {
+function showMediaMenu(x: number, y: number, items: Array<{ label: string; run(): void }>): void {
   const menu = document.createElement('div')
   menu.className = 'cm-image-menu'
-  const item = document.createElement('button')
-  item.type = 'button'
-  item.textContent = get(t)('img.copy')
-  item.onclick = () => {
-    close()
-    copyImage(img).then(
-      () => showToast(get(t)('toast.imgCopied')),
-      () => showToast(get(t)('toast.copyFail'))
-    )
+  for (const it of items) {
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.textContent = it.label
+    btn.onclick = () => {
+      close()
+      it.run()
+    }
+    menu.appendChild(btn)
   }
-  menu.appendChild(item)
   const close = () => {
     menu.remove()
     window.removeEventListener('pointerdown', onAway, true)
@@ -207,6 +216,47 @@ function showImageMenu(x: number, y: number, img: HTMLImageElement): void {
   window.addEventListener('blur', close)
 }
 
+function copyImageWithToast(img: HTMLImageElement): void {
+  copyImage(img).then(
+    () => showToast(get(t)('toast.imgCopied')),
+    () => showToast(get(t)('toast.copyFail'))
+  )
+}
+
+/** Remove the media's `![alt](src)` from the document (undoable, file kept). */
+function deleteMediaAt(view: EditorView, dom: HTMLElement): void {
+  const pos = view.posAtDOM(dom)
+  const line = view.state.doc.lineAt(pos)
+  IMAGE_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = IMAGE_RE.exec(line.text))) {
+    const from = line.from + m.index
+    const to = from + m[0].length
+    if (pos >= from && pos <= to) {
+      view.dispatch({ changes: { from, to } })
+      return
+    }
+  }
+}
+
+/** Save a copy of the video through a download link (the clipboard cannot
+ *  hold video files, so "copy" for videos means "download a copy"). */
+function downloadVideo(src: string, markdownSrc: string): void {
+  const a = document.createElement('a')
+  a.href = src
+  a.download = decodeURI(markdownSrc).split('/').pop() || 'video'
+  a.click()
+}
+
+/** Overlay on the media's top edge showing its raw markdown on hover, so
+ *  the underlying text stays discoverable without any selection logic. */
+function addMarkdownCaption(wrap: HTMLElement, alt: string, src: string): void {
+  const cap = document.createElement('span')
+  cap.className = 'cm-media-caption'
+  cap.textContent = `![${alt}](${src})`
+  wrap.prepend(cap)
+}
+
 class ImageWidget extends WidgetType {
   constructor(
     readonly src: string,
@@ -223,6 +273,7 @@ class ImageWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = 'cm-image-widget'
+    addMarkdownCaption(wrap, this.alt, this.src)
     const img = document.createElement('img')
     img.alt = this.alt
     img.onload = () => view.requestMeasure()
@@ -238,36 +289,92 @@ class ImageWidget extends WidgetType {
     wrap.addEventListener('contextmenu', (e) => {
       e.preventDefault()
       e.stopPropagation()
-      showImageMenu(e.clientX, e.clientY, img)
+      showMediaMenu(e.clientX, e.clientY, [
+        { label: get(t)('img.copy'), run: () => copyImageWithToast(img) },
+        { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) }
+      ])
+    })
+    // Double click = quick copy (the player owns double clicks on videos,
+    // so only images get this shortcut).
+    wrap.addEventListener('dblclick', (e) => {
+      e.preventDefault()
+      copyImageWithToast(img)
+    })
+    // Left-clicking the image must not move any selection: the browser would
+    // otherwise place the native selection inside the widget DOM, which maps
+    // to no markdown position — CodeMirror falls back to the document start
+    // and the page scrolls to the top.
+    img.draggable = false
+    wrap.addEventListener('mousedown', (e) => {
+      if (e.button !== 2) e.preventDefault()
     })
     return wrap
   }
 
-  // Right-click must reach the <img> untouched: if CodeMirror handled it,
-  // the caret would move into the markdown, the widget would be torn down,
-  // and the native "Copy image" menu would never appear.
-  ignoreEvent(event: Event): boolean {
-    return event.type === 'contextmenu' || (event instanceof MouseEvent && event.button === 2)
+  // No event on the image may reach CodeMirror: a handled click would move
+  // the caret into the markdown and tear the widget down (and right-click
+  // needs to reach the <img> for the "Copy image" menu). The raw text stays
+  // reachable with the arrow keys.
+  ignoreEvent(): boolean {
+    return true
   }
 }
 
-/** Lines the selection touches show raw markdown so they stay editable. */
-function selectionLines(view: EditorView): Array<{ from: number; to: number }> {
-  return view.state.selection.ranges.map((r) => ({
-    from: view.state.doc.lineAt(r.from).from,
-    to: view.state.doc.lineAt(r.to).to
-  }))
-}
+class VideoWidget extends WidgetType {
+  constructor(
+    readonly src: string,
+    readonly alt: string,
+    readonly resolve: ImageResolver
+  ) {
+    super()
+  }
 
-function touchesSelection(lines: Array<{ from: number; to: number }>, from: number, to: number): boolean {
-  return lines.some((l) => from <= l.to && to >= l.from)
+  eq(other: VideoWidget): boolean {
+    return other.src === this.src && other.alt === this.alt
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('span')
+    wrap.className = 'cm-video-widget'
+    addMarkdownCaption(wrap, this.alt, this.src)
+    const video = document.createElement('video')
+    video.controls = true
+    video.preload = 'metadata'
+    video.onloadedmetadata = () => view.requestMeasure()
+    if (/^(https?:|data:|blob:)/.test(this.src)) {
+      video.src = this.src
+    } else {
+      void this.resolve(this.src).then((url) => {
+        if (url) video.src = url
+        else wrap.classList.add('cm-video-missing')
+      })
+    }
+    wrap.appendChild(video)
+    wrap.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      showMediaMenu(e.clientX, e.clientY, [
+        { label: get(t)('video.download'), run: () => downloadVideo(video.src, this.src) },
+        { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) }
+      ])
+    })
+    return wrap
+  }
+
+  // The player owns every event: a click on play/pause/scrubber must not
+  // move the caret into the markdown, which would tear the widget down
+  // mid-playback. The raw text stays reachable with the arrow keys.
+  ignoreEvent(): boolean {
+    return true
+  }
 }
 
 /**
- * Render `![alt](src)` as the actual image. The raw markdown shows only
- * while the selection is strictly inside it (arrow keys / drag-select into
- * it), NOT whenever the caret is merely on the same line — otherwise a note
- * whose only content is an image could never show it.
+ * Render `![alt](src)` as the actual image — or a video player when src has
+ * a video extension. The raw markdown shows only while the selection is
+ * strictly inside it (arrow keys / drag-select into it), NOT whenever the
+ * caret is merely on the same line — otherwise a note whose only content is
+ * an image could never show it.
  */
 function imagePlugin(resolve: ImageResolver): Extension {
   const build = (view: EditorView): DecorationSet => {
@@ -284,7 +391,10 @@ function imagePlugin(resolve: ImageResolver): Extension {
           const from = line.from + m.index
           const to = from + m[0].length
           if (!selectionInside(from, to)) {
-            builder.add(from, to, Decoration.replace({ widget: new ImageWidget(m[2], m[1], resolve) }))
+            const widget = VIDEO_SRC_RE.test(m[2])
+              ? new VideoWidget(m[2], m[1], resolve)
+              : new ImageWidget(m[2], m[1], resolve)
+            builder.add(from, to, Decoration.replace({ widget }))
           }
         }
         pos = line.to + 1
@@ -351,12 +461,14 @@ const HIDDEN_MARKS = new Set(['HeaderMark', 'EmphasisMark', 'CodeMark', 'Striket
 
 /**
  * Hide formatting characters (#, **, *, `, ~~, >) plus link syntax, keeping
- * the styled text. The line under the caret shows the raw markdown.
+ * the styled text. Marks reappear only while the selection is inside the
+ * enclosing formatted span (the word in **bold**, the [link](url)), not
+ * whenever the caret merely lands somewhere on the same line.
  */
 function hideMarkupPlugin(): Extension {
   const build = (view: EditorView): DecorationSet => {
     const marks: Array<{ from: number; to: number }> = []
-    const active = selectionLines(view)
+    const sel = view.state.selection.ranges
     const doc = view.state.doc
     for (const range of view.visibleRanges) {
       syntaxTree(view.state).iterate({
@@ -366,7 +478,10 @@ function hideMarkupPlugin(): Extension {
           let { from, to } = node
           const isLink = node.name === 'LinkMark' || node.name === 'URL'
           if (!HIDDEN_MARKS.has(node.name) && !isLink) return
-          if (touchesSelection(active, from, to)) return
+          const parent = node.node.parent
+          const spanFrom = parent ? parent.from : from
+          const spanTo = parent ? parent.to : to
+          if (sel.some((r) => r.from <= spanTo && r.to >= spanFrom)) return
           // "# Title" / "> quote": swallow the space after the mark too.
           if ((node.name === 'HeaderMark' || node.name === 'QuoteMark') && doc.sliceString(to, to + 1) === ' ') {
             to += 1
@@ -467,11 +582,11 @@ export async function createNoteEditor(
         syntaxHighlighting(markdownHighlight),
         headingSpacingPlugin(),
         imagePlugin(opts.resolveImage),
-        // Pasting an image (screenshot, copied image) saves it next to the
-        // document and inserts its markdown link at the caret.
+        // Pasting an image or video (screenshot, copied file) saves it next
+        // to the document and inserts its markdown link at the caret.
         EditorView.domEventHandlers({
           paste: (event, v) => {
-            const files = [...(event.clipboardData?.files ?? [])].filter((f) => f.type.startsWith('image/'))
+            const files = [...(event.clipboardData?.files ?? [])].filter(isMediaFile)
             if (files.length === 0) return false
             event.preventDefault()
             void (async () => {

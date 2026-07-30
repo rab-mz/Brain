@@ -169,7 +169,7 @@
     return `${base}.${ext}`
   }
 
-  /** Save a dropped image next to the document and return its relative link. */
+  /** Save a dropped image/video next to the document and return its relative link. */
   async function saveImage(file: File): Promise<string> {
     const clean = sanitizeImageName(file.name)
     const dot = clean.lastIndexOf('.')
@@ -184,19 +184,26 @@
 
   let dragOver = $state(false)
 
-  function hasImageFiles(e: DragEvent): boolean {
-    return [...(e.dataTransfer?.items ?? [])].some((i) => i.kind === 'file' && i.type.startsWith('image/'))
+  // Duplicated from blocks/editor.ts on purpose: importing a value from
+  // there would pull CodeMirror into the initial bundle. During dragover
+  // only the MIME type exists (no filename), so videos with an empty type
+  // are only caught at drop time via the extension.
+  const VIDEO_SRC_RE = /\.(mp4|mov|m4v|webm)$/i
+  const isMediaType = (type: string) => type.startsWith('image/') || type.startsWith('video/')
+
+  function hasMediaFiles(e: DragEvent): boolean {
+    return [...(e.dataTransfer?.items ?? [])].some((i) => i.kind === 'file' && (isMediaType(i.type) || i.type === ''))
   }
 
   function onDragOver(e: DragEvent) {
-    if (!hasImageFiles(e)) return
+    if (!hasMediaFiles(e)) return
     e.preventDefault()
     dragOver = true
   }
 
   async function onDrop(e: DragEvent) {
     dragOver = false
-    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith('image/'))
+    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => isMediaType(f.type) || VIDEO_SRC_RE.test(f.name))
     if (files.length === 0 || !doc) return
     e.preventDefault()
     for (const file of files) {

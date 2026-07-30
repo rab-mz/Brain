@@ -506,6 +506,40 @@ textarea {
   min-height: 40vh;
 }
 
+/* Raw markdown of an image/video: overlaid on the media's top edge,
+   visible only on hover. Overlay (not a flowing line) so nothing shifts. */
+.cm-image-widget,
+.cm-video-widget {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+
+.cm-media-caption {
+  position: absolute;
+  top: 6px; /* aligns with the media's 6px top margin */
+  left: 0;
+  z-index: 1;
+  max-width: 100%;
+  padding: 3px 9px;
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 12px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--bg2) 88%, transparent);
+  border-radius: 8px 0 8px 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity 0.12s;
+  pointer-events: none;
+}
+
+.cm-image-widget:hover .cm-media-caption,
+.cm-video-widget:hover .cm-media-caption {
+  opacity: 1;
+}
+
 /* Inline images rendered from ![alt](src) */
 .cm-image-widget img {
   display: block;
@@ -517,6 +551,22 @@ textarea {
 
 .cm-image-widget.cm-image-missing::after {
   content: '🖼 ?';
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* Inline videos: same ![alt](src) syntax, rendered as a player */
+.cm-video-widget video {
+  display: block;
+  max-width: 100%;
+  max-height: 480px;
+  border-radius: 8px;
+  margin: 6px 0;
+  background: #000;
+}
+
+.cm-video-widget.cm-video-missing::after {
+  content: '🎬 ?';
   color: var(--muted);
   font-size: 13px;
 }
@@ -567,9 +617,14 @@ textarea {
   margin-left: 0;
 }
 
-.note-host .cm-selectionBackground,
-.note-host .cm-content ::selection {
+.note-host .cm-selectionBackground {
   background: color-mix(in srgb, var(--accent) 28%, transparent) !important;
+}
+
+/* drawSelection already paints the selection above; if the native one keeps
+   its color too, every drag shows two offset overlapping boxes. */
+.note-host .cm-content ::selection {
+  background: transparent !important;
 }
 
 /* ---------- Floating "+" ---------- */
@@ -898,6 +953,28 @@ textarea {
 .right-bar .markup-btn.on {
   color: var(--accent);
   background: var(--bg2);
+}
+
+/* Instant tooltip to the left of each bar button (native title is slow). */
+.right-bar button {
+  position: relative;
+}
+
+.right-bar button:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  right: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--bg2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 20%);
 }
 
 /* ---------- Modal ---------- */

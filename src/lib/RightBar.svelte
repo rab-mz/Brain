@@ -16,14 +16,14 @@
 </script>
 
 <div class="right-bar">
-  <button title={$t('bar.download')} onclick={ondownload}>⤓</button>
-  <button title={$t('bar.theme')} onclick={oncycletheme}>◑</button>
-  <button class="font-btn" title={$t('bar.font')} onclick={oncyclefont}>A</button>
+  <button data-tip={$t('bar.download')} onclick={ondownload}>⤓</button>
+  <button data-tip={$t('bar.theme')} onclick={oncycletheme}>◑</button>
+  <button class="font-btn" data-tip={$t('bar.font')} onclick={oncyclefont}>A</button>
   <button
     class="markup-btn"
     class:on={$hideMarkup}
-    title={$t($hideMarkup ? 'bar.showMarkup' : 'bar.hideMarkup')}
+    data-tip={$t($hideMarkup ? 'bar.showMarkup' : 'bar.hideMarkup')}
     onclick={() => hideMarkup.update((v) => !v)}>#</button
   >
-  <button title={$t('bar.fullscreen')} onclick={onfullscreen}>⛶</button>
+  <button data-tip={$t('bar.fullscreen')} onclick={onfullscreen}>⛶</button>
 </div>
