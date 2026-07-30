@@ -580,6 +580,71 @@ textarea {
   border-radius: 6px;
 }
 
+/* Inline file cards (PDF, CSV): icon + name + extension badge. Type colors
+   are fixed hues (not theme variables) so red always reads "PDF". */
+.cm-file-widget {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 100%;
+  margin: 6px 0;
+  padding: 9px 13px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg2);
+  user-select: none;
+}
+
+.cm-file-icon {
+  display: flex;
+  flex: none;
+}
+
+.cm-file-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.cm-file-pdf .cm-file-icon {
+  color: #e5484d;
+}
+
+.cm-file-csv .cm-file-icon {
+  color: #30a46c;
+}
+
+.cm-file-name {
+  font-size: 13.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cm-file-ext {
+  flex: none;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.cm-file-pdf .cm-file-ext {
+  color: #e5484d;
+  background: color-mix(in srgb, #e5484d 14%, transparent);
+}
+
+.cm-file-csv .cm-file-ext {
+  color: #30a46c;
+  background: color-mix(in srgb, #30a46c 14%, transparent);
+}
+
+.cm-file-widget.cm-file-missing {
+  opacity: 0.55;
+  border-style: dashed;
+}
+
 /* Right-click menu on inline images */
 .cm-image-menu {
   position: fixed;
@@ -606,8 +671,79 @@ textarea {
 }
 
 .doc-outer.drag-over {
-  outline: 2px dashed var(--accent);
+  /* Takes the dragged type's color when a single type is detected. */
+  outline: 2.5px dashed var(--drag-accent, var(--accent));
   outline-offset: -6px;
+}
+
+/* Typed drop overlay: badge(s) matching the dragged files' MIME types,
+   or a generic one when the type is unknown. Sticky + height 0 keeps the
+   badges centered in the viewport however far the document is scrolled;
+   pointer-events none so drag events keep hitting .doc-outer.
+   align-items flex-start is load-bearing: the container is 0px tall, so
+   the default stretch would squash the badges to zero content height. */
+.drop-overlay {
+  position: sticky;
+  top: 0;
+  height: 0;
+  overflow: visible;
+  z-index: 50;
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+  align-items: flex-start;
+  pointer-events: none;
+}
+
+.drop-badge {
+  --drop-color: var(--accent);
+  margin-top: 28vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 34px 48px;
+  border: 2.5px dashed var(--drop-color);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--drop-color) 10%, var(--bg2));
+  box-shadow: 0 12px 40px rgb(0 0 0 / 30%);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--drop-color);
+}
+
+.drop-badge svg {
+  display: block;
+  width: 64px;
+  height: 64px;
+  color: var(--drop-color);
+}
+
+.drop-image {
+  --drop-color: #3b82f6;
+}
+
+.drop-video {
+  --drop-color: #8b5cf6;
+}
+
+.drop-pdf {
+  --drop-color: #e5484d;
+}
+
+.drop-csv {
+  --drop-color: #30a46c;
+}
+
+.drop-generic {
+  --drop-color: var(--muted);
+  color: var(--fg);
+}
+
+.drop-formats {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
 }
 
 .note-fallback {

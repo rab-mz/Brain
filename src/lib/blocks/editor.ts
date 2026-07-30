@@ -153,14 +153,23 @@ export type ImageResolver = (src: string) => Promise<string | null>
 
 const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
 
-// Video files reuse the ![alt](src) image syntax — the extension decides
-// which widget renders, so the markdown stays readable outside the app.
+// Video and document files reuse the ![alt](src) image syntax — the
+// extension decides which widget renders, so the markdown stays readable
+// outside the app.
 const VIDEO_SRC_RE = /\.(mp4|mov|m4v|webm)$/i
+const FILE_SRC_RE = /\.(pdf|csv)$/i
 
-/** Media (image or video) accepted by paste/drop. Some .mov drags arrive
+/** Media (image, video, pdf, csv) accepted by paste/drop. Some drags arrive
  *  with an empty MIME type, so the filename extension is the fallback. */
 export function isMediaFile(file: File): boolean {
-  return file.type.startsWith('image/') || file.type.startsWith('video/') || VIDEO_SRC_RE.test(file.name)
+  return (
+    file.type.startsWith('image/') ||
+    file.type.startsWith('video/') ||
+    file.type === 'application/pdf' ||
+    file.type === 'text/csv' ||
+    VIDEO_SRC_RE.test(file.name) ||
+    FILE_SRC_RE.test(file.name)
+  )
 }
 
 // Chrome's native "Copy image" re-fetches the src internally and silently
@@ -239,13 +248,34 @@ function deleteMediaAt(view: EditorView, dom: HTMLElement): void {
   }
 }
 
-/** Save a copy of the video through a download link (the clipboard cannot
- *  hold video files, so "copy" for videos means "download a copy"). */
-function downloadVideo(src: string, markdownSrc: string): void {
+/** Save a copy of the file through a download link (the clipboard cannot
+ *  hold videos or PDFs, so "copy" for those means "download a copy"). */
+function downloadFile(src: string, markdownSrc: string): void {
   const a = document.createElement('a')
   a.href = src
-  a.download = decodeURI(markdownSrc).split('/').pop() || 'video'
+  a.download = decodeURI(markdownSrc).split('/').pop() || 'file'
   a.click()
+}
+
+/** Open the file in a new tab. CSVs are re-wrapped as text/plain first:
+ *  a text/csv blob URL triggers a download instead of rendering. */
+async function openFileInTab(url: string, kind: 'pdf' | 'csv'): Promise<void> {
+  if (kind === 'pdf') {
+    window.open(url, '_blank')
+    return
+  }
+  const blob = await (await fetch(url)).blob()
+  window.open(URL.createObjectURL(new Blob([blob], { type: 'text/plain' })), '_blank')
+}
+
+function copyCsvText(url: string): void {
+  fetch(url)
+    .then((r) => r.text())
+    .then((text) => navigator.clipboard.writeText(text))
+    .then(
+      () => showToast(get(t)('toast.copied')),
+      () => showToast(get(t)('toast.copyFail'))
+    )
 }
 
 /** Overlay on the media's top edge showing its raw markdown on hover, so
@@ -354,7 +384,7 @@ class VideoWidget extends WidgetType {
       e.preventDefault()
       e.stopPropagation()
       showMediaMenu(e.clientX, e.clientY, [
-        { label: get(t)('video.download'), run: () => downloadVideo(video.src, this.src) },
+        { label: get(t)('video.download'), run: () => downloadFile(video.src, this.src) },
         { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) }
       ])
     })
@@ -369,9 +399,81 @@ class VideoWidget extends WidgetType {
   }
 }
 
+// Monochrome SVG icons (no emoji): document sheet for PDF, grid for CSV.
+const FILE_ICONS: Record<'pdf' | 'csv', string> = {
+  pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/><path d="M8.5 13h7M8.5 16.5h7"/></svg>',
+  csv: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="1.5"/><path d="M4 10h16M4 14.5h16M9.5 5v14M14.75 10v9"/></svg>'
+}
+
+class FileWidget extends WidgetType {
+  constructor(
+    readonly src: string,
+    readonly alt: string,
+    readonly kind: 'pdf' | 'csv',
+    readonly resolve: ImageResolver
+  ) {
+    super()
+  }
+
+  eq(other: FileWidget): boolean {
+    return other.src === this.src && other.alt === this.alt && other.kind === this.kind
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('span')
+    wrap.className = `cm-file-widget cm-file-${this.kind}`
+    // No markdown caption here: the card already shows the file name, and
+    // hovering a full path over it is just noise (Baha's call).
+    const icon = document.createElement('span')
+    icon.className = 'cm-file-icon'
+    icon.innerHTML = FILE_ICONS[this.kind]
+    const name = document.createElement('span')
+    name.className = 'cm-file-name'
+    name.textContent = this.alt || decodeURI(this.src).split('/').pop() || this.src
+    const ext = document.createElement('span')
+    ext.className = 'cm-file-ext'
+    ext.textContent = this.kind.toUpperCase()
+    wrap.append(icon, name, ext)
+
+    // The blob URL arrives async; actions before it resolves are no-ops.
+    let url: string | null = null
+    void this.resolve(this.src).then((u) => {
+      if (u) url = u
+      else wrap.classList.add('cm-file-missing')
+    })
+
+    wrap.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const items = [
+        { label: get(t)('file.open'), run: () => url && void openFileInTab(url, this.kind) },
+        ...(this.kind === 'csv' ? [{ label: get(t)('csv.copy'), run: () => url && copyCsvText(url) }] : []),
+        { label: get(t)('file.download'), run: () => url && downloadFile(url, this.src) },
+        { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) }
+      ]
+      showMediaMenu(e.clientX, e.clientY, items)
+    })
+    // Double click = quick open, mirroring the images' quick copy.
+    wrap.addEventListener('dblclick', (e) => {
+      e.preventDefault()
+      if (url) void openFileInTab(url, this.kind)
+    })
+    // Same caret protection as ImageWidget: no click may move the selection
+    // into the widget DOM (see ImageWidget.toDOM).
+    wrap.addEventListener('mousedown', (e) => {
+      if (e.button !== 2) e.preventDefault()
+    })
+    return wrap
+  }
+
+  ignoreEvent(): boolean {
+    return true
+  }
+}
+
 /**
  * Render `![alt](src)` as the actual image — or a video player when src has
- * a video extension. The raw markdown shows only while the selection is
+ * a video extension, or a file card for PDF/CSV. The raw markdown shows only while the selection is
  * strictly inside it (arrow keys / drag-select into it), NOT whenever the
  * caret is merely on the same line — otherwise a note whose only content is
  * an image could never show it.
@@ -391,9 +493,12 @@ function imagePlugin(resolve: ImageResolver): Extension {
           const from = line.from + m.index
           const to = from + m[0].length
           if (!selectionInside(from, to)) {
+            const fileExt = FILE_SRC_RE.exec(m[2])
             const widget = VIDEO_SRC_RE.test(m[2])
               ? new VideoWidget(m[2], m[1], resolve)
-              : new ImageWidget(m[2], m[1], resolve)
+              : fileExt
+                ? new FileWidget(m[2], m[1], fileExt[1].toLowerCase() as 'pdf' | 'csv', resolve)
+                : new ImageWidget(m[2], m[1], resolve)
             builder.add(from, to, Decoration.replace({ widget }))
           }
         }

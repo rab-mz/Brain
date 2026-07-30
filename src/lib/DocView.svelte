@@ -169,7 +169,7 @@
     return `${base}.${ext}`
   }
 
-  /** Save a dropped image/video next to the document and return its relative link. */
+  /** Save a dropped image/video/file next to the document and return its relative link. */
   async function saveImage(file: File): Promise<string> {
     const clean = sanitizeImageName(file.name)
     const dot = clean.lastIndexOf('.')
@@ -183,13 +183,33 @@
   }
 
   let dragOver = $state(false)
+  /** File kinds detected from the drag's MIME types, for the drop overlay.
+   *  Empty while dragOver = only unknown types (no MIME): generic badge. */
+  let dragKinds: DropKind[] = $state([])
 
   // Duplicated from blocks/editor.ts on purpose: importing a value from
   // there would pull CodeMirror into the initial bundle. During dragover
-  // only the MIME type exists (no filename), so videos with an empty type
-  // are only caught at drop time via the extension.
-  const VIDEO_SRC_RE = /\.(mp4|mov|m4v|webm)$/i
-  const isMediaType = (type: string) => type.startsWith('image/') || type.startsWith('video/')
+  // only the MIME type exists (no filename), so files with an empty type
+  // (some .mov drags) are only caught at drop time via the extension.
+  const MEDIA_EXT_RE = /\.(mp4|mov|m4v|webm|pdf|csv)$/i
+
+  type DropKind = 'image' | 'video' | 'pdf' | 'csv'
+  // Same hues as the .drop-* CSS classes; tints the page outline while dragging.
+  const DROP_COLORS: Record<DropKind, string> = {
+    image: '#3b82f6',
+    video: '#8b5cf6',
+    pdf: '#e5484d',
+    csv: '#30a46c'
+  }
+  function kindOfType(type: string): DropKind | null {
+    if (type.startsWith('image/')) return 'image'
+    if (type.startsWith('video/')) return 'video'
+    if (type === 'application/pdf') return 'pdf'
+    // Windows often reports .csv as an Excel type.
+    if (type === 'text/csv' || type === 'application/vnd.ms-excel') return 'csv'
+    return null
+  }
+  const isMediaType = (type: string) => kindOfType(type) !== null
 
   function hasMediaFiles(e: DragEvent): boolean {
     return [...(e.dataTransfer?.items ?? [])].some((i) => i.kind === 'file' && (isMediaType(i.type) || i.type === ''))
@@ -199,11 +219,16 @@
     if (!hasMediaFiles(e)) return
     e.preventDefault()
     dragOver = true
+    const kinds = [...(e.dataTransfer?.items ?? [])]
+      .filter((i) => i.kind === 'file')
+      .map((i) => kindOfType(i.type))
+      .filter((k): k is DropKind => k !== null)
+    dragKinds = [...new Set(kinds)]
   }
 
   async function onDrop(e: DragEvent) {
     dragOver = false
-    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => isMediaType(f.type) || VIDEO_SRC_RE.test(f.name))
+    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => isMediaType(f.type) || MEDIA_EXT_RE.test(f.name))
     if (files.length === 0 || !doc) return
     e.preventDefault()
     for (const file of files) {
@@ -307,12 +332,57 @@
   <article
     class="doc-outer"
     class:drag-over={dragOver}
+    style={dragOver && dragKinds.length === 1 ? `--drag-accent: ${DROP_COLORS[dragKinds[0]]}` : ''}
     onpointerdown={onPointerDown}
     onclick={onBackgroundClick}
     ondragover={onDragOver}
     ondragleave={() => (dragOver = false)}
     ondrop={onDrop}
   >
+    {#if dragOver}
+      <div class="drop-overlay">
+        {#if dragKinds.length > 0}
+          {#each dragKinds as kind (kind)}
+            <div class="drop-badge drop-{kind}">
+              {#if kind === 'image'}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+                  <circle cx="9" cy="10" r="1.6" />
+                  <path d="M3.5 17l4.5-4.5 3.5 3.5 3.5-3.5 5.5 5.5" />
+                </svg>
+              {:else if kind === 'video'}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="2.5" y="6.5" width="13" height="11" rx="2" />
+                  <path d="M15.5 10.5l6-3.5v10l-6-3.5" />
+                </svg>
+              {:else if kind === 'pdf'}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z" />
+                  <path d="M14 3v5h5" />
+                  <path d="M8.5 13h7M8.5 16.5h7" />
+                </svg>
+              {:else}
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect x="4" y="5" width="16" height="14" rx="1.5" />
+                  <path d="M4 10h16M4 14.5h16M9.5 5v14M14.75 10v9" />
+                </svg>
+              {/if}
+              <span>{$t(`drop.${kind}`)}</span>
+            </div>
+          {/each}
+        {:else}
+          <div class="drop-badge drop-generic">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z" />
+              <path d="M14 3v5h5" />
+              <path d="M12 11v6M9.5 14.5l2.5 2.5 2.5-2.5" />
+            </svg>
+            <span>{$t('drop.generic')}</span>
+            <span class="drop-formats">{$t('drop.formats')}</span>
+          </div>
+        {/if}
+      </div>
+    {/if}
     <div class="doc-inner">
       <div class="doc-head">
         {#if isJournal}
