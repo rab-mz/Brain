@@ -30,7 +30,6 @@
     fileTitles,
     currentPath,
     paletteOpen,
-    newNoteOpen,
     sidebarCollapsed,
     brainIndex,
     toast,
@@ -363,7 +362,7 @@
     if (path.startsWith('journal/')) {
       return formatDayFull(path.split('/')[1].replace(/\.md$/, ''), get(lang))
     }
-    return get(fileTitles)[path] ?? path.split('/').pop()!.replace(/\.md$/, '')
+    return get(fileTitles)[path] || path.split('/').pop()!.replace(/\.md$/, '')
   }
 
   function requestDelete() {
@@ -466,8 +465,7 @@
     // Chrome reserves Ctrl/Cmd+N for new windows, so Alt+N is the fallback.
     if ((mod || e.altKey) && e.code === 'KeyN') {
       e.preventDefault()
-      sidebarCollapsed.set(false)
-      newNoteOpen.set(true)
+      void createNote('')
       return
     }
     if (mod && e.code === 'KeyJ') {

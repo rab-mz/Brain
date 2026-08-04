@@ -660,9 +660,12 @@ export async function createNoteEditor(
     saveImage(file: File): Promise<string>
     onChange(text: string): void
     onFocus(): void
+    /** Right-click on an empty line offers block inserts; the host splits the note. */
+    onInsert(kind: 'todo' | 'sql' | 'code'): void
   }
 ): Promise<NoteEditor> {
   const { markdown, markdownKeymap } = await import('@codemirror/lang-markdown')
+  const { Strikethrough } = await import('@lezer/markdown')
 
   const markupCompartment = new Compartment()
 
@@ -686,7 +689,9 @@ export async function createNoteEditor(
         // Setext headings removed: a `-----` right under a paragraph would
         // silently promote it to a chapter title, but here dashes are used
         // as visual separators and headings are always written with `#`.
-        markdown({ extensions: { remove: ['SetextHeading'] } }),
+        // Strikethrough (GFM) is added on top of commonmark so the menu's
+        // ~~strike~~ renders styled instead of as raw tildes.
+        markdown({ extensions: [Strikethrough, { remove: ['SetextHeading'] }] }),
         syntaxHighlighting(markdownHighlight),
         headingSpacingPlugin(),
         imagePlugin(opts.resolveImage),
@@ -709,6 +714,48 @@ export async function createNoteEditor(
                 })
               }
             })()
+            return true
+          },
+          // Right-click is the block/formatting menu: on an empty line it
+          // offers the inserts (todo/SQL/code — this replaced the floating
+          // "+"), on text the markdown formattings. Media widgets are left
+          // alone: they bring up their own menu (copy, download, remove).
+          contextmenu: (event, v) => {
+            const target = event.target as HTMLElement
+            if (target.closest('.cm-image-widget, .cm-video-widget, .cm-file-widget')) return false
+            const pos = v.posAtCoords({ x: event.clientX, y: event.clientY }, false)
+            event.preventDefault()
+            const sel = v.state.selection.main
+            // Clicking inside the selection keeps it (format it); anywhere
+            // else the caret moves there, grabbing the word under the click.
+            if (sel.empty || pos < sel.from || pos > sel.to) {
+              const word = v.state.wordAt(pos)
+              v.dispatch({ selection: word ? { anchor: word.from, head: word.to } : { anchor: pos } })
+            }
+            v.focus()
+            const cur = v.state.selection.main
+            const emptyLine = cur.empty && v.state.doc.lineAt(pos).text.trim() === ''
+            const items = emptyLine
+              ? [
+                  { label: get(t)('insert.todo'), run: () => opts.onInsert('todo') },
+                  { label: 'SQL', run: () => opts.onInsert('sql') },
+                  { label: get(t)('insert.code'), run: () => opts.onInsert('code') }
+                ]
+              : (
+                  [
+                    ['fmt.bold', '**'],
+                    ['fmt.italic', '*'],
+                    ['fmt.code', '`'],
+                    ['fmt.strike', '~~']
+                  ] as const
+                ).map(([key, marker]) => ({
+                  label: get(t)(key),
+                  run: () => {
+                    toggleWrap(marker)(v)
+                    v.focus()
+                  }
+                }))
+            showMediaMenu(event.clientX, event.clientY, items)
             return true
           }
         }),

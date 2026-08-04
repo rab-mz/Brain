@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { noteTree, journalFiles, fileTitles, currentPath, sidebarCollapsed, newNoteOpen } from './stores'
+  import { noteTree, journalFiles, fileTitles, currentPath, sidebarCollapsed } from './stores'
   import { t, lang, formatDayList, formatDayShort, formatMonth, type Lang } from './i18n'
   import { focusOnMount } from './actions'
   import FolderIcon from './FolderIcon.svelte'
@@ -24,7 +24,6 @@
     onexport: () => void
   } = $props()
 
-  let newTitle = $state('')
   let newFolderOpen = $state(false)
   let newFolderName = $state('')
 
@@ -104,18 +103,6 @@
     return years
   })
 
-  function onNewNoteKeydown(e: KeyboardEvent) {
-    if (e.key === 'Enter') {
-      const title = newTitle.trim()
-      if (title) oncreate(title)
-      newTitle = ''
-      newNoteOpen.set(false)
-    } else if (e.key === 'Escape') {
-      newTitle = ''
-      newNoteOpen.set(false)
-    }
-  }
-
   function onNewFolderKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       const name = newFolderName.trim()
@@ -133,7 +120,8 @@
   }
 
   function noteLabel(path: string): string {
-    return $fileTitles[path] ?? path.split('/').pop()!.replace(/\.md$/, '')
+    // `||`, not `??`: a freshly created note has an empty title until named.
+    return $fileTitles[path] || path.split('/').pop()!.replace(/\.md$/, '')
   }
 
   function dayLabel(day: string, l: Lang): string {
@@ -281,7 +269,7 @@
           <button class="icon-btn" data-tip={$t('sidebar.newFolder')} onclick={() => (newFolderOpen = true)}>
             <FolderIcon plus />
           </button>
-          <button class="icon-btn" data-tip={$t('sidebar.newNote')} onclick={() => newNoteOpen.set(true)}>+</button>
+          <button class="icon-btn" data-tip={$t('sidebar.newNote')} onclick={() => oncreate('')}>+</button>
         </span>
       </div>
       {#if newFolderOpen}
@@ -292,16 +280,6 @@
           placeholder={$t('sidebar.newFolderPh')}
           onkeydown={onNewFolderKeydown}
           onblur={() => (newFolderOpen = false)}
-        />
-      {/if}
-      {#if $newNoteOpen}
-        <input
-          class="new-note-input"
-          use:focusOnMount
-          bind:value={newTitle}
-          placeholder={$t('sidebar.newNotePh')}
-          onkeydown={onNewNoteKeydown}
-          onblur={() => newNoteOpen.set(false)}
         />
       {/if}
       <ul>

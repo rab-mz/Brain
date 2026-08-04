@@ -11,7 +11,8 @@
     saveimage,
     onedit,
     onready,
-    onactive
+    onactive,
+    oninsert
   }: {
     block: Extract<Block, { type: 'note' }>
     grow?: boolean
@@ -20,6 +21,7 @@
     onedit: () => void
     onready: (block: object, api: NoteEditor) => void
     onactive: (block: object) => void
+    oninsert: (kind: 'todo' | 'sql' | 'code') => void
   } = $props()
 
   let host: HTMLElement | null = $state(null)
@@ -44,7 +46,8 @@
           block.text = text
           onedit()
         },
-        onFocus: () => onactive(block)
+        onFocus: () => onactive(block),
+        onInsert: oninsert
       })
       if (disposed) {
         created.destroy()

@@ -88,7 +88,6 @@ export const fileTitles = writable<Record<string, string>>({})
 export const currentPath = writable<string | null>(null)
 
 export const paletteOpen = writable(false)
-export const newNoteOpen = writable(false)
 
 export const brainIndex = writable<BrainIndex | null>(null)
 

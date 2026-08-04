@@ -2,7 +2,6 @@
   import { onMount, onDestroy, tick } from 'svelte'
   import { parseDocument, serializeDocument, type BrainDoc, type Block } from './parser/parser'
   import { readFile, writeFile, readFileBlob, fileExists, normalizePath, ASSETS_DIR } from './fs/files'
-  import { sidebarCollapsed } from './stores'
   import { t, lang, formatDayFull } from './i18n'
   import TodoBlock from './blocks/TodoBlock.svelte'
   import CodeBlock from './blocks/CodeBlock.svelte'
@@ -22,7 +21,7 @@
   } = $props()
 
   let doc: BrainDoc | null = $state(null)
-  let plusOpen = $state(false)
+  let titleInput: HTMLInputElement | null = $state(null)
   let lastFileContent = ''
   let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -100,6 +99,13 @@
     // — child components receive proxied blocks, so comparing against the
     // raw parsed object would never match.
     const blocks = doc!.blocks
+    // A note without a name yet (fresh "+" creation) opens on the title
+    // input instead, so typing the name is the natural next gesture.
+    if (!isJournal && !(parsed.frontmatter.title ?? '').trim()) {
+      await tick()
+      titleInput?.focus()
+      return
+    }
     autofocusTarget = blocks[blocks.length - 1]
     await tick()
   })
@@ -312,7 +318,7 @@
 
   function onBackgroundClick(e: MouseEvent) {
     if (wasDrag(e)) return
-    if ((e.target as HTMLElement).closest('.block, .doc-head, .float-plus')) return
+    if ((e.target as HTMLElement).closest('.block, .doc-head')) return
     if (!doc) return
     const last = doc.blocks[doc.blocks.length - 1]
     if (last?.type === 'note') noteApis.get(last)?.focusAt(e.clientX, e.clientY)
@@ -322,6 +328,14 @@
     if (!doc) return
     doc.frontmatter.title = (e.target as HTMLInputElement).value
     scheduleSave()
+  }
+
+  // Enter on the title drops into the page body, ready to write.
+  function onTitleKeydown(e: KeyboardEvent) {
+    if (e.key !== 'Enter' || !doc) return
+    e.preventDefault()
+    const last = doc.blocks[doc.blocks.length - 1]
+    if (last?.type === 'note') noteApis.get(last)?.focusEnd()
   }
 </script>
 
@@ -390,9 +404,11 @@
         {:else}
           <input
             class="doc-title-input"
+            bind:this={titleInput}
             value={doc.frontmatter.title ?? baseName}
             placeholder={$t('doc.titlePh')}
             oninput={onTitleInput}
+            onkeydown={onTitleKeydown}
           />
         {/if}
         <button class="doc-delete" data-tip={$t('doc.deleteTooltip')} onclick={onrequestdelete}>
@@ -405,7 +421,7 @@
       {#each doc.blocks as block, i (idOf(block))}
         <div class="block" class:block-special={block.type !== 'note'} data-bid={idOf(block)}>
           {#if block.type === 'todo'}
-            <TodoBlock {block} onedit={scheduleSave} />
+            <TodoBlock {block} onedit={scheduleSave} onremove={() => removeBlock(block)} />
           {:else if block.type === 'code'}
             <CodeBlock {block} onedit={scheduleSave} />
           {:else}
@@ -417,9 +433,10 @@
               onedit={scheduleSave}
               onready={onNoteReady}
               onactive={onNoteActive}
+              oninsert={insertSpecial}
             />
           {/if}
-          {#if block.type !== 'note'}
+          {#if block.type === 'code'}
             <button class="block-delete" title={$t('block.remove')} onclick={() => removeBlock(block)}>×</button>
           {/if}
         </div>
@@ -427,31 +444,4 @@
     </div>
   </article>
 
-  <div class="float-plus" style="left: {$sidebarCollapsed ? 20 : 272}px">
-    {#if plusOpen}
-      <div class="plus-menu">
-        <button
-          onclick={() => {
-            plusOpen = false
-            insertSpecial('todo')
-          }}>{$t('insert.todo')}</button
-        >
-        <button
-          onclick={() => {
-            plusOpen = false
-            insertSpecial('sql')
-          }}>SQL</button
-        >
-        <button
-          onclick={() => {
-            plusOpen = false
-            insertSpecial('code')
-          }}>{$t('insert.code')}</button
-        >
-      </div>
-    {/if}
-    <button class="plus-btn" class:open={plusOpen} title={$t('insert.title')} onclick={() => (plusOpen = !plusOpen)}>
-      +
-    </button>
-  </div>
 {/if}

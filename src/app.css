@@ -772,72 +772,11 @@ textarea {
   background: transparent !important;
 }
 
-/* ---------- Floating "+" ---------- */
-
-.float-plus {
-  position: fixed;
-  bottom: 22px;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  opacity: 0.45;
-  transition:
-    opacity 0.15s,
-    left 0.15s;
-}
-
-.float-plus:hover,
-.float-plus:focus-within {
-  opacity: 1;
-}
-
-.plus-btn {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  font-size: 20px;
-  line-height: 1;
-  transition: transform 0.15s;
-}
-
-.plus-btn:hover,
-.plus-btn.open {
-  color: var(--accent);
-  border-color: var(--accent);
-}
-
-.plus-btn.open {
-  transform: rotate(45deg);
-}
-
-.plus-menu {
-  display: flex;
-  gap: 6px;
-  order: 1;
-}
-
-.plus-menu button {
-  font-size: 13px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 6px 14px;
-}
-
-.plus-menu button:hover {
-  color: var(--fg);
-  border-color: var(--accent);
-}
-
 /* ---------- Todo block ---------- */
 
 .todo-item {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 1px 0;
 }
@@ -846,15 +785,20 @@ textarea {
   accent-color: var(--accent);
   width: 15px;
   height: 15px;
-  margin: 0;
+  margin: 4px 0 0;
   flex-shrink: 0;
 }
 
+/* A textarea (auto-grown from JS) so long todos wrap instead of scrolling. */
 .todo-text {
   flex: 1;
   padding: 2px 4px;
   border-radius: 4px;
   font-family: var(--doc-font);
+  resize: none;
+  overflow: hidden;
+  line-height: 1.45;
+  display: block;
 }
 
 .todo-text.done {
