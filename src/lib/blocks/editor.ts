@@ -793,7 +793,26 @@ export async function createNoteEditor(
     // page, so the whole surface feels writable.
     focusAt(x: number, y: number) {
       const pos = view.posAtCoords({ x, y }, false)
-      placeCaret(pos ?? view.state.doc.length)
+      const end = view.state.doc.length
+      if (pos == null) {
+        placeCaret(end)
+        return
+      }
+      // Zen-style vertical freedom: a click below the last line grows the
+      // document with blank lines down to the clicked height, instead of
+      // snapping the caret back up to the end of the text.
+      if (pos === end) {
+        const endCoords = view.coordsAtPos(end)
+        if (endCoords && y > endCoords.bottom) {
+          const lines = Math.round((y - endCoords.bottom) / view.defaultLineHeight)
+          if (lines > 0) {
+            view.dispatch({ changes: { from: end, insert: '\n'.repeat(lines) } })
+            placeCaret(view.state.doc.length)
+            return
+          }
+        }
+      }
+      placeCaret(pos)
     },
     setHideMarkup(hide: boolean) {
       view.dispatch({ effects: markupCompartment.reconfigure(hide ? hideMarkupPlugin() : []) })
