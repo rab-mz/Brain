@@ -226,6 +226,17 @@
   // those back on the page must not duplicate the card.
   const BRAIN_FILE_DRAG = 'application/x-brain-file'
 
+  // A dragged card can be released anywhere in the app; cancel those drops
+  // globally, or a textarea (the title, sidebar inputs) would insert stray
+  // text through the browser's default drop action.
+  function onWindowDropCapture(e: DragEvent) {
+    if (e.dataTransfer?.types.includes(BRAIN_FILE_DRAG)) e.preventDefault()
+  }
+  onMount(() => {
+    window.addEventListener('drop', onWindowDropCapture, true)
+    return () => window.removeEventListener('drop', onWindowDropCapture, true)
+  })
+
   function hasMediaFiles(e: DragEvent): boolean {
     if (e.dataTransfer?.types.includes(BRAIN_FILE_DRAG)) return false
     return [...(e.dataTransfer?.items ?? [])].some((i) => i.kind === 'file' && (isMediaType(i.type) || i.type === ''))

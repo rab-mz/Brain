@@ -137,7 +137,12 @@ const noteTheme = EditorView.theme({
     lineHeight: '1.65',
     // 2px on the right keeps the drawn caret visible at the edge.
     padding: '2px 2px 2px 0',
-    caretColor: 'var(--fg)'
+    caretColor: 'var(--fg)',
+    // The base theme's scroller is a flex row with align-items: flex-start,
+    // which shrinks the content to the longest line when every line is
+    // short — and anything 100%-wide inside (the --- separator) shrinks
+    // with it. Notes always span the full column.
+    minWidth: '100%'
   },
   '.cm-line': { padding: '0' },
   // Padding, not margin: CodeMirror measures line heights from padding-box.
