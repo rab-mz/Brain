@@ -2,6 +2,7 @@
   import { onMount, onDestroy, tick } from 'svelte'
   import { parseDocument, serializeDocument, type BrainDoc, type Block } from './parser/parser'
   import { readFile, writeFile, readFileBlob, fileExists, normalizePath, ASSETS_DIR } from './fs/files'
+  import { autosize, fit } from './actions'
   import { t, lang, formatDayFull } from './i18n'
   import TodoBlock from './blocks/TodoBlock.svelte'
   import CodeBlock from './blocks/CodeBlock.svelte'
@@ -21,7 +22,7 @@
   } = $props()
 
   let doc: BrainDoc | null = $state(null)
-  let titleInput: HTMLInputElement | null = $state(null)
+  let titleInput: HTMLTextAreaElement | null = $state(null)
   let lastFileContent = ''
   let saveTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -119,6 +120,9 @@
       const parsed = parseDocument(text)
       parsed.blocks = normalizeBlocks(parsed.blocks)
       doc = parsed
+      // An externally edited title can change how many lines it wraps to.
+      await tick()
+      if (titleInput) autosize(titleInput)
     }
   }
 
@@ -217,7 +221,13 @@
   }
   const isMediaType = (type: string) => kindOfType(type) !== null
 
+  // Set on drags that start from one of our own file cards (see
+  // blocks/editor.ts, same duplication rationale as MEDIA_EXT_RE): dropping
+  // those back on the page must not duplicate the card.
+  const BRAIN_FILE_DRAG = 'application/x-brain-file'
+
   function hasMediaFiles(e: DragEvent): boolean {
+    if (e.dataTransfer?.types.includes(BRAIN_FILE_DRAG)) return false
     return [...(e.dataTransfer?.items ?? [])].some((i) => i.kind === 'file' && (isMediaType(i.type) || i.type === ''))
   }
 
@@ -234,6 +244,7 @@
 
   async function onDrop(e: DragEvent) {
     dragOver = false
+    if (e.dataTransfer?.types.includes(BRAIN_FILE_DRAG)) return
     const files = [...(e.dataTransfer?.files ?? [])].filter((f) => isMediaType(f.type) || MEDIA_EXT_RE.test(f.name))
     if (files.length === 0 || !doc) return
     e.preventDefault()
@@ -326,7 +337,11 @@
 
   function onTitleInput(e: Event) {
     if (!doc) return
-    doc.frontmatter.title = (e.target as HTMLInputElement).value
+    const el = e.target as HTMLTextAreaElement
+    // Frontmatter titles are single-line: pasted newlines become spaces.
+    if (el.value.includes('\n')) el.value = el.value.replace(/\n+/g, ' ')
+    doc.frontmatter.title = el.value
+    autosize(el)
     scheduleSave()
   }
 
@@ -402,14 +417,18 @@
         {#if isJournal}
           <h1 class="doc-title">{formatDayFull(journalDay, $lang)}</h1>
         {:else}
-          <input
+          <!-- A textarea (not an input) so long titles wrap to more lines
+               instead of clipping; Enter still drops into the body. -->
+          <textarea
             class="doc-title-input"
             bind:this={titleInput}
+            rows="1"
             value={doc.frontmatter.title ?? baseName}
             placeholder={$t('doc.titlePh')}
+            use:fit
             oninput={onTitleInput}
             onkeydown={onTitleKeydown}
-          />
+          ></textarea>
         {/if}
         <button class="doc-delete" data-tip={$t('doc.deleteTooltip')} onclick={onrequestdelete}>
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">

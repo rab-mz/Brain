@@ -158,6 +158,13 @@ const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
 // outside the app.
 const VIDEO_SRC_RE = /\.(mp4|mov|m4v|webm)$/i
 const FILE_SRC_RE = /\.(pdf|csv)$/i
+const FILE_MIME: Record<'pdf' | 'csv', string> = { pdf: 'application/pdf', csv: 'text/csv' }
+
+// Marks a drag that started from one of our own file cards, so the in-app
+// drop handlers (below and in DocView) can tell it apart from a real file
+// drag and not re-import the file. Duplicated in DocView.svelte on purpose:
+// importing it from here would pull CodeMirror into the initial bundle.
+const BRAIN_FILE_DRAG = 'application/x-brain-file'
 
 /** Media (image, video, pdf, csv) accepted by paste/drop. Some drags arrive
  *  with an empty MIME type, so the filename extension is the fallback. */
@@ -266,6 +273,22 @@ async function openFileInTab(url: string, kind: 'pdf' | 'csv'): Promise<void> {
   }
   const blob = await (await fetch(url)).blob()
   window.open(URL.createObjectURL(new Blob([blob], { type: 'text/plain' })), '_blank')
+}
+
+/** Copy the raw file to the clipboard. Browsers accept only a short list of
+ *  MIME types there, so a refused kind gets a toast pointing at drag&drop,
+ *  which does carry the real file into Finder and other apps. */
+async function copyFileToClipboard(url: string, kind: 'pdf' | 'csv'): Promise<void> {
+  const type = FILE_MIME[kind]
+  const supports = (ClipboardItem as { supports?: (t: string) => boolean }).supports
+  try {
+    if (supports && !supports(type)) throw new Error('unsupported')
+    const blob = (async () => new Blob([await (await fetch(url)).blob()], { type }))()
+    await navigator.clipboard.write([new ClipboardItem({ [type]: blob })])
+    showToast(get(t)('toast.copied'))
+  } catch {
+    showToast(get(t)('toast.fileCopyDrag'))
+  }
 }
 
 function copyCsvText(url: string): void {
@@ -437,9 +460,17 @@ class FileWidget extends WidgetType {
 
     // The blob URL arrives async; actions before it resolves are no-ops.
     let url: string | null = null
-    void this.resolve(this.src).then((u) => {
-      if (u) url = u
-      else wrap.classList.add('cm-file-missing')
+    let fileData: File | null = null
+    const fileName = decodeURI(this.src).split('/').pop() || `file.${this.kind}`
+    void this.resolve(this.src).then(async (u) => {
+      if (!u) {
+        wrap.classList.add('cm-file-missing')
+        return
+      }
+      url = u
+      // Prefetched: dragstart is synchronous and needs the File ready.
+      const blob = await (await fetch(u)).blob()
+      fileData = new File([blob], fileName, { type: FILE_MIME[this.kind] })
     })
 
     wrap.addEventListener('contextmenu', (e) => {
@@ -447,6 +478,7 @@ class FileWidget extends WidgetType {
       e.stopPropagation()
       const items = [
         { label: get(t)('file.open'), run: () => url && void openFileInTab(url, this.kind) },
+        { label: get(t)('file.copy'), run: () => url && void copyFileToClipboard(url, this.kind) },
         ...(this.kind === 'csv' ? [{ label: get(t)('csv.copy'), run: () => url && copyCsvText(url) }] : []),
         { label: get(t)('file.download'), run: () => url && downloadFile(url, this.src) },
         { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) }
@@ -458,10 +490,20 @@ class FileWidget extends WidgetType {
       e.preventDefault()
       if (url) void openFileInTab(url, this.kind)
     })
-    // Same caret protection as ImageWidget: no click may move the selection
-    // into the widget DOM (see ImageWidget.toDOM).
-    wrap.addEventListener('mousedown', (e) => {
-      if (e.button !== 2) e.preventDefault()
+    // The card drags straight out of the app: Finder/desktop receive the
+    // real file via Chrome's DownloadURL, web targets (mail, chats) via the
+    // attached File. The marker lets in-app drop handlers ignore the drag,
+    // so it cannot duplicate the card. No preventDefault on mousedown here
+    // (it would stop the browser from ever starting the drag); the caret
+    // stays protected anyway — ignoreEvent() keeps CodeMirror out and
+    // user-select: none keeps the native selection from anchoring inside.
+    wrap.draggable = true
+    wrap.addEventListener('dragstart', (e) => {
+      if (!e.dataTransfer || !url) return
+      e.dataTransfer.effectAllowed = 'copy'
+      e.dataTransfer.setData(BRAIN_FILE_DRAG, this.src)
+      e.dataTransfer.setData('DownloadURL', `${FILE_MIME[this.kind]}:${fileName}:${url}`)
+      if (fileData) e.dataTransfer.items.add(fileData)
     })
     return wrap
   }
@@ -551,6 +593,61 @@ function headingSpacingPlugin(): Extension {
       decorations: build(view),
       update(this: { decorations: DecorationSet }, update: ViewUpdate) {
         if (update.docChanged || update.viewportChanged) {
+          this.decorations = build(update.view)
+        }
+      }
+    }),
+    { decorations: (v) => v.decorations }
+  )
+}
+
+// ---------- Horizontal rules ----------
+
+class HrWidget extends WidgetType {
+  eq(): boolean {
+    return true
+  }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement('span')
+    span.className = 'cm-hr-widget'
+    return span
+  }
+
+  // Let clicks through to CodeMirror: the caret lands on the rule's line,
+  // which reveals the raw dashes for editing.
+  ignoreEvent(): boolean {
+    return false
+  }
+}
+
+/** Render `---` (and `***` / `___`) on its own line as an actual separator
+ *  line. The raw dashes come back while the selection touches that line, so
+ *  the text stays editable in place — same deal as the media widgets. */
+function hrPlugin(): Extension {
+  const build = (view: EditorView): DecorationSet => {
+    const builder = new RangeSetBuilder<Decoration>()
+    const sel = view.state.selection.ranges
+    for (const range of view.visibleRanges) {
+      syntaxTree(view.state).iterate({
+        from: range.from,
+        to: range.to,
+        enter(node) {
+          if (node.name !== 'HorizontalRule') return
+          const line = view.state.doc.lineAt(node.from)
+          if (sel.some((r) => r.from <= line.to && r.to >= line.from)) return
+          builder.add(line.from, line.to, Decoration.replace({ widget: new HrWidget() }))
+        }
+      })
+    }
+    return builder.finish()
+  }
+
+  return ViewPlugin.define(
+    (view) => ({
+      decorations: build(view),
+      update(this: { decorations: DecorationSet }, update: ViewUpdate) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged) {
           this.decorations = build(update.view)
         }
       }
@@ -694,6 +791,7 @@ export async function createNoteEditor(
         markdown({ extensions: [Strikethrough, { remove: ['SetextHeading'] }] }),
         syntaxHighlighting(markdownHighlight),
         headingSpacingPlugin(),
+        hrPlugin(),
         imagePlugin(opts.resolveImage),
         // Pasting an image or video (screenshot, copied file) saves it next
         // to the document and inserts its markdown link at the caret.
@@ -715,6 +813,18 @@ export async function createNoteEditor(
               }
             })()
             return true
+          },
+          // Media drops belong to DocView (save to assets/ + insert the
+          // card). Claiming the event here skips CodeMirror's own drop
+          // handler, which reads text files (CSVs!) and would paste their
+          // whole content into the note on top of the card.
+          drop: (event) => {
+            if (event.dataTransfer?.types.includes(BRAIN_FILE_DRAG)) {
+              // One of our own cards dragged around: never re-import it.
+              event.preventDefault()
+              return true
+            }
+            return [...(event.dataTransfer?.files ?? [])].some(isMediaFile)
           },
           // Right-click is the block/formatting menu: on an empty line it
           // offers the inserts (todo/SQL/code — this replaced the floating

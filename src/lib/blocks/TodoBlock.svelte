@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { t } from '../i18n'
+  import { autosize, fit } from '../actions'
   import type { Block } from '../parser/parser'
 
   let {
@@ -22,23 +23,6 @@
     if (el) {
       el.focus()
       el.setSelectionRange(el.value.length, el.value.length)
-    }
-  }
-
-  // Long todos wrap: the field is a textarea kept as tall as its content.
-  function autosize(el: HTMLTextAreaElement) {
-    el.style.height = 'auto'
-    el.style.height = el.scrollHeight + 'px'
-  }
-
-  function fit(el: HTMLTextAreaElement) {
-    autosize(el)
-    const onResize = () => autosize(el)
-    window.addEventListener('resize', onResize)
-    return {
-      destroy() {
-        window.removeEventListener('resize', onResize)
-      }
     }
   }
 

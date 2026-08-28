@@ -416,13 +416,19 @@ textarea {
   flex: 1;
 }
 
+/* A textarea, so long titles wrap to more lines instead of clipping. */
 .doc-title-input {
   font-size: 26px;
   font-weight: 700;
+  line-height: 1.25;
   flex: 1;
+  display: block;
+  margin: 0;
   padding: 0;
   border-radius: 6px;
   min-width: 0;
+  resize: none;
+  overflow: hidden;
 }
 
 .doc-title-input::placeholder {
@@ -581,7 +587,8 @@ textarea {
 }
 
 /* Inline file cards (PDF, CSV): icon + name + extension badge. Type colors
-   are fixed hues (not theme variables) so red always reads "PDF". */
+   are fixed hues (not theme variables) so red always reads "PDF".
+   Cards are draggable (the drag carries the real file out of the app). */
 .cm-file-widget {
   position: relative;
   display: inline-flex;
@@ -594,6 +601,7 @@ textarea {
   border-radius: 8px;
   background: var(--bg2);
   user-select: none;
+  cursor: grab;
 }
 
 .cm-file-icon {
@@ -643,6 +651,24 @@ textarea {
 .cm-file-widget.cm-file-missing {
   opacity: 0.55;
   border-style: dashed;
+}
+
+/* `---` on its own line rendered as an actual separator; the raw dashes
+   come back while the caret is on that line. */
+.cm-hr-widget {
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  /* One text line tall, so revealing the dashes doesn't shift the page. */
+  height: 1.65em;
+  vertical-align: bottom;
+}
+
+.cm-hr-widget::before {
+  content: '';
+  width: 100%;
+  border-top: 2px solid var(--border);
+  border-radius: 1px;
 }
 
 /* Right-click menu on inline images */
