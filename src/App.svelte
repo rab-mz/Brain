@@ -402,6 +402,12 @@
 
   // ---------- Right bar actions ----------
 
+  let mainEl: HTMLElement | null = $state(null)
+
+  function scrollToTop() {
+    mainEl?.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+
   async function downloadTxt() {
     const path = get(currentPath)
     if (!path || path === 'folder' || !root) return
@@ -509,7 +515,7 @@
     {:else}
       <button class="expand-btn" title={$t('sidebar.expand')} onclick={() => sidebarCollapsed.set(false)}>»</button>
     {/if}
-    <main class="main">
+    <main class="main" bind:this={mainEl}>
       {#if $currentPath === 'ideas'}
         <IdeasView root={root!} />
       {:else if $currentPath === 'folder'}
@@ -521,6 +527,7 @@
       {/if}
     </main>
     <RightBar
+      onscrolltop={scrollToTop}
       ondownload={downloadTxt}
       oncycletheme={cycleTheme}
       oncyclefont={cycleFont}

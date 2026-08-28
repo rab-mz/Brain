@@ -3,11 +3,13 @@
   import { hideMarkup } from './stores'
 
   let {
+    onscrolltop,
     ondownload,
     oncycletheme,
     oncyclefont,
     onfullscreen
   }: {
+    onscrolltop: () => void
     ondownload: () => void
     oncycletheme: () => void
     oncyclefont: () => void
@@ -16,6 +18,7 @@
 </script>
 
 <div class="right-bar">
+  <button data-tip={$t('bar.scrollTop')} onclick={onscrolltop}>⤒</button>
   <button data-tip={$t('bar.download')} onclick={ondownload}>⤓</button>
   <button data-tip={$t('bar.theme')} onclick={oncycletheme}>◑</button>
   <button class="font-btn" data-tip={$t('bar.font')} onclick={oncyclefont}>A</button>
