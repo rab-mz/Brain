@@ -117,6 +117,7 @@ const en: Record<string, string> = {
   'toast.snippet': 'Snippet copied',
   'toast.exported': 'Exported JSON',
   'toast.deleted': 'Deleted',
+  'toast.noteNotFound': 'Note not found',
   'lang.switch': 'Italiano'
 }
 
@@ -213,6 +214,7 @@ const it: Record<string, string> = {
   'toast.snippet': 'Snippet copiato',
   'toast.exported': 'JSON esportato',
   'toast.deleted': 'Eliminato',
+  'toast.noteNotFound': 'Nota non trovata',
   'lang.switch': 'English'
 }
 

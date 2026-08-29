@@ -288,6 +288,7 @@
           <li>
             <button
               class="side-item side-group"
+              class:open={isOpen(`folder:${folder.name}`)}
               class:drop-into={dropInto === dir}
               class:drop-before={dropBeforeFolder === folder.name}
               draggable="true"
@@ -298,7 +299,7 @@
               ondrop={(e) => onFolderHeaderDrop(e, folder.name, dir)}
             >
               <span class="chev">{isOpen(`folder:${folder.name}`) ? '▾' : '▸'}</span>
-              <FolderIcon />
+              <FolderIcon open={isOpen(`folder:${folder.name}`)} />
               {folder.name}
               <span class="group-count">{folder.files.length}</span>
             </button>
@@ -372,7 +373,11 @@
             {/each}
           {:else}
             <li>
-              <button class="side-item side-group" onclick={() => toggleOpen(`year:${yearGroup.year}`)}>
+              <button
+                class="side-item side-group"
+                class:open={isOpen(`year:${yearGroup.year}`)}
+                onclick={() => toggleOpen(`year:${yearGroup.year}`)}
+              >
                 <span class="chev">{isOpen(`year:${yearGroup.year}`) ? '▾' : '▸'}</span>
                 {yearGroup.year}
               </button>
@@ -421,7 +426,11 @@
   {@const visibleDays = monthGroup.days.filter((d) => d !== today)}
   {#if visibleDays.length > 0}
     <li>
-      <button class="side-item side-group" onclick={() => toggleOpen(`month:${monthGroup.month}`)}>
+      <button
+        class="side-item side-group"
+        class:open={isOpen(`month:${monthGroup.month}`)}
+        onclick={() => toggleOpen(`month:${monthGroup.month}`)}
+      >
         <span class="chev">{isOpen(`month:${monthGroup.month}`) ? '▾' : '▸'}</span>
         {formatMonth(monthGroup.month, $lang)}
         <span class="group-count">{visibleDays.length}</span>

@@ -145,7 +145,10 @@
     return `---\ntitle: ${day}\ntype: journal\ncreated: ${iso}\nupdated: ${iso}\n---\n\n## What happened\n\n## Notes\n`
   }
 
-  async function openPath(path: string, fallbackToToday = false) {
+  async function openPath(path: string, fallbackToToday = false, keepTrail = false) {
+    // Direct navigation (sidebar, shortcuts, delete) starts a fresh page
+    // history; only wiki-link hops and crumb clicks preserve the trail.
+    if (!keepTrail) trail = []
     const r = root!
     if (path === 'ideas' || path === 'folder') {
       currentPath.set(path)
@@ -174,6 +177,55 @@
       localStorage.setItem('brain:last-doc', path)
     } catch {}
   }
+
+  // ---------- Wiki links ([[note-name]]) and their breadcrumb trail ----------
+
+  let trail = $state<Array<{ path: string; title: string }>>([])
+
+  /** Where the note behind a [[name]] lives: file name first (any notes/
+   *  folder), then frontmatter title, then journal for date-shaped names. */
+  function findNoteByName(name: string): string | null {
+    const clean = name.trim()
+    const tree = get(noteTree)
+    const fname = `${clean}.md`
+    if (tree.files.includes(fname)) return `notes/${fname}`
+    for (const folder of tree.folders) {
+      if (folder.files.includes(fname)) return `notes/${folder.name}/${fname}`
+    }
+    const lower = clean.toLowerCase()
+    for (const [path, title] of Object.entries(get(fileTitles))) {
+      if (title.toLowerCase() === lower) return path
+    }
+    if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return `journal/${clean}.md`
+    return null
+  }
+
+  function openWikiLink(name: string) {
+    const target = findNoteByName(name)
+    if (!target) {
+      showToast(get(t)('toast.noteNotFound'))
+      return
+    }
+    const cur = get(currentPath)
+    if (target === cur) return
+    if (cur && cur !== 'folder' && cur !== 'ideas') {
+      trail = [...trail, { path: cur, title: displayTitle(cur) }]
+    }
+    void openPath(target, false, true)
+  }
+
+  function goBackTo(i: number) {
+    const entry = trail[i]
+    trail = trail.slice(0, i)
+    void openPath(entry.path, false, true)
+  }
+
+  const currentCrumbTitle = $derived.by(() => {
+    const p = $currentPath
+    if (!p || p === 'ideas' || p === 'folder') return ''
+    if (p.startsWith('journal/')) return formatDayFull(p.split('/')[1].replace(/\.md$/, ''), $lang)
+    return $fileTitles[p] || p.split('/').pop()!.replace(/\.md$/, '')
+  })
 
   function slugify(title: string): string {
     return (
@@ -516,13 +568,28 @@
       <button class="expand-btn" title={$t('sidebar.expand')} onclick={() => sidebarCollapsed.set(false)}>»</button>
     {/if}
     <main class="main" bind:this={mainEl}>
+      {#if trail.length > 0}
+        <nav class="crumbs">
+          {#each trail as entry, i (i)}
+            <button class="crumb" onclick={() => goBackTo(i)}>{entry.title}</button>
+            <span class="crumb-sep">›</span>
+          {/each}
+          <span class="crumb-here">{currentCrumbTitle}</span>
+        </nav>
+      {/if}
       {#if $currentPath === 'ideas'}
         <IdeasView root={root!} />
       {:else if $currentPath === 'folder'}
         <FolderView root={root!} onchangefolder={chooseFolder} onrenamefolder={renameNoteFolder} />
       {:else if $currentPath}
         {#key $currentPath}
-          <DocView root={root!} path={$currentPath} onsaved={onDocSaved} onrequestdelete={requestDelete} />
+          <DocView
+            root={root!}
+            path={$currentPath}
+            onsaved={onDocSaved}
+            onrequestdelete={requestDelete}
+            onnavigate={openWikiLink}
+          />
         {/key}
       {/if}
     </main>

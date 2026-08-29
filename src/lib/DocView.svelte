@@ -13,12 +13,15 @@
     root,
     path,
     onsaved,
-    onrequestdelete
+    onrequestdelete,
+    onnavigate
   }: {
     root: FileSystemDirectoryHandle
     path: string
     onsaved: (path: string, doc: BrainDoc) => void
     onrequestdelete: () => void
+    /** A [[wiki-link]] in a note was clicked: open that note. */
+    onnavigate: (name: string) => void
   } = $props()
 
   let doc: BrainDoc | null = $state(null)
@@ -299,11 +302,12 @@
   }
 
   // Insert at the cursor of the focused note (splitting it), or at the end.
-  function insertSpecial(kind: 'todo' | 'sql' | 'code') {
+  async function insertSpecial(kind: 'todo' | 'sql' | 'code') {
     if (!doc) return
     const special = makeSpecial(kind)
     const blocks = doc.blocks
     const idx = lastActiveNote ? blocks.indexOf(lastActiveNote as Block) : -1
+    let inserted: Block
     if (idx >= 0) {
       const note = blocks[idx] as Extract<Block, { type: 'note' }>
       const api = noteApis.get(lastActiveNote!)
@@ -311,12 +315,23 @@
       const before = note.text.slice(0, offset)
       const after = note.text.slice(offset)
       blocks.splice(idx, 1, { type: 'note', text: before }, special, { type: 'note', text: after })
+      // Read the block back through the reactive array: the {#each} keys on
+      // the proxy's identity, not on the raw object that went in.
+      inserted = blocks[idx + 1]
     } else {
       blocks.push(special)
+      inserted = blocks[blocks.length - 1]
     }
     doc.blocks = normalizeBlocks(doc.blocks)
     lastActiveNote = null
     scheduleSave()
+    // A fresh todo is for typing into right now — focus its first item
+    // (before this, the caret was lost and the first keystrokes went
+    // nowhere).
+    if (kind === 'todo') {
+      await tick()
+      articleEl?.querySelector<HTMLTextAreaElement>(`.block[data-bid="${idOf(inserted)}"] .todo-text`)?.focus()
+    }
   }
 
   function removeBlock(block: Block) {
@@ -338,12 +353,33 @@
     )
   }
 
+  let articleEl: HTMLElement | null = $state(null)
+
   function onBackgroundClick(e: MouseEvent) {
     if (wasDrag(e)) return
     if ((e.target as HTMLElement).closest('.block, .doc-head')) return
-    if (!doc) return
-    const last = doc.blocks[doc.blocks.length - 1]
-    if (last?.type === 'note') noteApis.get(last)?.focusAt(e.clientX, e.clientY)
+    if (!doc || !articleEl) return
+    // Route the click to the block at the same height (side-gutter clicks
+    // land beside the column). Sending everything to the trailing note
+    // scrolled the page to the bottom whenever the click fell in a gap
+    // between blocks or beside a todo — even while just reading.
+    const els = [...articleEl.querySelectorAll<HTMLElement>('.block[data-bid]')]
+    for (const el of els) {
+      const r = el.getBoundingClientRect()
+      if (e.clientY < r.top || e.clientY > r.bottom) continue
+      const bid = Number(el.dataset.bid)
+      const target = doc.blocks.find((b) => idOf(b) === bid)
+      // Beside a todo/code block: nothing sensible to focus — no jump.
+      if (target?.type === 'note') noteApis.get(target)?.focusAt(e.clientX, e.clientY)
+      return
+    }
+    // Below the last block: the trailing note grows to meet the click.
+    const lastEl = els[els.length - 1]
+    if (lastEl && e.clientY > lastEl.getBoundingClientRect().bottom) {
+      const last = doc.blocks[doc.blocks.length - 1]
+      if (last?.type === 'note') noteApis.get(last)?.focusAt(e.clientX, e.clientY)
+    }
+    // Gaps between blocks: deliberately inert.
   }
 
   function onTitleInput(e: Event) {
@@ -371,6 +407,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
   <article
     class="doc-outer"
+    bind:this={articleEl}
     class:drag-over={dragOver}
     style={dragOver && dragKinds.length === 1 ? `--drag-accent: ${DROP_COLORS[dragKinds[0]]}` : ''}
     onpointerdown={onPointerDown}
@@ -464,6 +501,7 @@
               onready={onNoteReady}
               onactive={onNoteActive}
               oninsert={insertSpecial}
+              {onnavigate}
             />
           {/if}
           {#if block.type === 'code'}

@@ -90,10 +90,30 @@ function parseBlocks(lines: string[], start: number): Block[] {
     if (todo) {
       const items: TodoItem[] = []
       while (i < lines.length) {
-        const m = lines[i].match(TODO_RE)
-        if (!m) break
-        items.push({ done: m[1] !== ' ', text: m[2] ?? '' })
-        i++
+        const l = lines[i]
+        const m = l.match(TODO_RE)
+        if (m) {
+          items.push({ done: m[1] !== ' ', text: m[2] ?? '' })
+          i++
+          continue
+        }
+        // Hard-wrapped items (files written by hand or by other tools):
+        // an indented line right under an item is its continuation — left
+        // in a note block, its 4 spaces of indent would render as code.
+        // An indented `- [ ]` is a nested item and joins the list flat.
+        if (/^[ \t]+\S/.test(l)) {
+          const trimmed = l.trim()
+          const nested = trimmed.match(TODO_RE)
+          if (nested) {
+            items.push({ done: nested[1] !== ' ', text: nested[2] ?? '' })
+          } else {
+            const last = items[items.length - 1]
+            last.text = last.text === '' ? trimmed : last.text + ' ' + trimmed
+          }
+          i++
+          continue
+        }
+        break
       }
       blocks.push({ type: 'todo', items })
       continue

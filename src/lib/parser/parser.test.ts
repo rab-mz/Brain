@@ -81,6 +81,49 @@ describe('parseDocument', () => {
     ])
   })
 
+  it('joins indented continuation lines into the todo item above', () => {
+    // Hard-wrapped todos written outside the app (e.g. 80-column wraps).
+    const md = [
+      '- [ ] first line of the item,',
+      '  wrapped onto a second line',
+      '    and a third with deeper indent.',
+      '- [x] short one',
+      '',
+      'A separate paragraph.',
+      ''
+    ].join('\n')
+    const doc = parseDocument(md)
+    expect(doc.blocks).toEqual([
+      {
+        type: 'todo',
+        items: [
+          {
+            done: false,
+            text: 'first line of the item, wrapped onto a second line and a third with deeper indent.'
+          },
+          { done: true, text: 'short one' }
+        ]
+      },
+      { type: 'note', text: 'A separate paragraph.' }
+    ])
+    // Once serialized, each item is exactly one line again (stable).
+    const again = parseDocument(serializeDocument(doc))
+    expect(again.blocks).toEqual(doc.blocks)
+  })
+
+  it('flattens indented nested todos into the same list', () => {
+    const doc = parseDocument('- [ ] parent\n  - [x] child\n')
+    expect(doc.blocks).toEqual([
+      {
+        type: 'todo',
+        items: [
+          { done: false, text: 'parent' },
+          { done: true, text: 'child' }
+        ]
+      }
+    ])
+  })
+
   it('handles CRLF input', () => {
     const doc = parseDocument('- [ ] a\r\n- [x] b\r\n')
     expect(doc.blocks).toEqual([

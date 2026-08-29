@@ -2,6 +2,8 @@
   import { tick } from 'svelte'
   import { t } from '../i18n'
   import { autosize, fit } from '../actions'
+  import { showMenu } from '../menu'
+  import { FORMATS, toggleMarkerInText } from '../format'
   import type { Block } from '../parser/parser'
 
   let {
@@ -48,6 +50,30 @@
       focusItem(Math.max(0, i - 1))
     }
   }
+
+  // Same formatting menu as the notes. The markers stay visible here (todo
+  // text is plain), but the markdown itself is identical.
+  function onContextMenu(e: MouseEvent, i: number) {
+    e.preventDefault()
+    const el = e.currentTarget as HTMLTextAreaElement
+    showMenu(
+      e.clientX,
+      e.clientY,
+      FORMATS.map(([key, marker]) => ({
+        label: $t(key),
+        run: () => {
+          const r = toggleMarkerInText(el.value, el.selectionStart, el.selectionEnd, marker)
+          if (!r) return
+          el.value = r.value
+          block.items[i].text = r.value
+          el.focus()
+          el.setSelectionRange(r.start, r.end)
+          autosize(el)
+          onedit()
+        }
+      }))
+    )
+  }
 </script>
 
 <div class="todo-block" bind:this={listEl}>
@@ -77,6 +103,7 @@
           onedit()
         }}
         onkeydown={(e) => onKeydown(e, i)}
+        oncontextmenu={(e) => onContextMenu(e, i)}
       ></textarea>
     </div>
   {/each}

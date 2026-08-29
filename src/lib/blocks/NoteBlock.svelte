@@ -12,7 +12,8 @@
     onedit,
     onready,
     onactive,
-    oninsert
+    oninsert,
+    onnavigate
   }: {
     block: Extract<Block, { type: 'note' }>
     grow?: boolean
@@ -22,6 +23,7 @@
     onready: (block: object, api: NoteEditor) => void
     onactive: (block: object) => void
     oninsert: (kind: 'todo' | 'sql' | 'code') => void
+    onnavigate: (name: string) => void
   } = $props()
 
   let host: HTMLElement | null = $state(null)
@@ -47,7 +49,8 @@
           onedit()
         },
         onFocus: () => onactive(block),
-        onInsert: oninsert
+        onInsert: oninsert,
+        onNavigate: onnavigate
       })
       if (disposed) {
         created.destroy()

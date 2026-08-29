@@ -262,9 +262,16 @@ textarea {
 
 .chev {
   color: var(--muted);
-  font-size: 10px;
-  width: 10px;
+  font-size: 13px;
+  width: 14px;
   flex-shrink: 0;
+  text-align: center;
+}
+
+/* An expanded group announces itself: accent chevron + folder icon. */
+.side-group.open .chev,
+.side-group.open .group-icon {
+  color: var(--accent);
 }
 
 .group-icon {
@@ -284,7 +291,11 @@ textarea {
 }
 
 .side-nested {
-  padding-left: 14px !important;
+  /* Guide line under the group header: the nested notes visibly belong
+     to the folder above, instead of floating at a vague indent. */
+  margin-left: 14px;
+  padding-left: 8px !important;
+  border-left: 1px solid var(--border);
 }
 
 /* Drag & drop targets */
@@ -374,6 +385,50 @@ textarea {
   flex: 1;
   overflow-y: auto;
   height: 100%;
+}
+
+/* Breadcrumb trail left by wiki-link hops: click a crumb to go back. */
+.crumbs {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 20px;
+  font-size: 13px;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  backdrop-filter: blur(6px);
+  border-bottom: 1px solid var(--border);
+  cursor: default;
+}
+
+.crumb {
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 6px;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.crumb:hover {
+  background: var(--bg3);
+}
+
+.crumb-sep {
+  color: var(--muted);
+}
+
+.crumb-here {
+  color: var(--muted);
+  padding: 2px 6px;
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .doc-outer {
@@ -669,6 +724,21 @@ textarea {
   width: 100%;
   border-top: 2px solid var(--border);
   border-radius: 1px;
+}
+
+/* [[wiki-link]] to another note, wikipedia style. The brackets are hidden
+   while reading; arrow keys into the range reveal the raw markdown. */
+.cm-wikilink {
+  color: var(--accent);
+  cursor: pointer;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  user-select: none;
+}
+
+.cm-wikilink:hover {
+  border-bottom-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 3px;
 }
 
 /* Right-click menu on inline images */

@@ -25,8 +25,10 @@ import {
 } from '@codemirror/language'
 import { oneDark } from '@codemirror/theme-one-dark'
 import { tags } from '@lezer/highlight'
+import type { SyntaxNode } from '@lezer/common'
 import { get } from 'svelte/store'
 import { showToast } from '../stores'
+import { showMenu } from '../menu'
 import { t } from '../i18n'
 
 async function languageExtension(language: string): Promise<Extension> {
@@ -203,39 +205,8 @@ function copyImage(img: HTMLImageElement): Promise<void> {
   return navigator.clipboard.write([new ClipboardItem({ 'image/png': png })])
 }
 
-function showMediaMenu(x: number, y: number, items: Array<{ label: string; run(): void }>): void {
-  const menu = document.createElement('div')
-  menu.className = 'cm-image-menu'
-  for (const it of items) {
-    const btn = document.createElement('button')
-    btn.type = 'button'
-    btn.textContent = it.label
-    btn.onclick = () => {
-      close()
-      it.run()
-    }
-    menu.appendChild(btn)
-  }
-  const close = () => {
-    menu.remove()
-    window.removeEventListener('pointerdown', onAway, true)
-    window.removeEventListener('keydown', onKey, true)
-    window.removeEventListener('blur', close)
-  }
-  const onAway = (e: PointerEvent) => {
-    if (!menu.contains(e.target as Node)) close()
-  }
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === 'Escape') close()
-  }
-  document.body.appendChild(menu)
-  const r = menu.getBoundingClientRect()
-  menu.style.left = Math.max(0, Math.min(x, window.innerWidth - r.width - 8)) + 'px'
-  menu.style.top = Math.max(0, Math.min(y, window.innerHeight - r.height - 8)) + 'px'
-  window.addEventListener('pointerdown', onAway, true)
-  window.addEventListener('keydown', onKey, true)
-  window.addEventListener('blur', close)
-}
+// The floating menu itself lives in ../menu (shared with the todo blocks).
+const showMediaMenu = showMenu
 
 function copyImageWithToast(img: HTMLImageElement): void {
   copyImage(img).then(
@@ -568,6 +539,83 @@ function imagePlugin(resolve: ImageResolver): Extension {
   )
 }
 
+// ---------- Wiki links ----------
+
+const WIKILINK_RE = /\[\[([^\]\n]+)\]\]/g
+
+class WikiLinkWidget extends WidgetType {
+  constructor(
+    readonly name: string,
+    readonly onNavigate: (name: string) => void
+  ) {
+    super()
+  }
+
+  eq(other: WikiLinkWidget): boolean {
+    return other.name === this.name
+  }
+
+  toDOM(): HTMLElement {
+    const span = document.createElement('span')
+    span.className = 'cm-wikilink'
+    span.textContent = this.name
+    // Same caret protection as the media widgets: the click must navigate,
+    // not seat the native selection inside the widget DOM.
+    span.addEventListener('mousedown', (e) => {
+      if (e.button !== 2) e.preventDefault()
+    })
+    span.addEventListener('click', (e) => {
+      e.preventDefault()
+      this.onNavigate(this.name)
+    })
+    return span
+  }
+
+  ignoreEvent(): boolean {
+    return true
+  }
+}
+
+/** Render `[[note-name]]` as a clickable link to that note, wikipedia
+ *  style. The raw brackets come back while the selection is inside the
+ *  range (arrow keys in), so the link stays editable in place. */
+function wikiLinkPlugin(onNavigate: (name: string) => void): Extension {
+  const build = (view: EditorView): DecorationSet => {
+    const builder = new RangeSetBuilder<Decoration>()
+    const sel = view.state.selection.ranges
+    const selectionInside = (from: number, to: number) => sel.some((r) => r.from < to && r.to > from)
+    for (const range of view.visibleRanges) {
+      let pos = range.from
+      while (pos <= range.to) {
+        const line = view.state.doc.lineAt(pos)
+        WIKILINK_RE.lastIndex = 0
+        let m: RegExpExecArray | null
+        while ((m = WIKILINK_RE.exec(line.text))) {
+          const from = line.from + m.index
+          const to = from + m[0].length
+          if (!selectionInside(from, to)) {
+            builder.add(from, to, Decoration.replace({ widget: new WikiLinkWidget(m[1], onNavigate) }))
+          }
+        }
+        pos = line.to + 1
+      }
+    }
+    return builder.finish()
+  }
+
+  return ViewPlugin.define(
+    (view) => ({
+      decorations: build(view),
+      update(this: { decorations: DecorationSet }, update: ViewUpdate) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+          this.decorations = build(update.view)
+        }
+      }
+    }),
+    { decorations: (v) => v.decorations }
+  )
+}
+
 // ---------- Heading spacing ----------
 
 const HEADING_NODE = /^(ATXHeading[1-6]|SetextHeading[12])$/
@@ -721,23 +769,53 @@ function hideMarkupPlugin(): Extension {
   )
 }
 
-/** Wrap the selection in a marker pair, or unwrap if already wrapped. */
+// Inline spans the format toggles recognize, keyed by their marker.
+const MARKER_NODE: Record<string, string> = {
+  '**': 'StrongEmphasis',
+  '*': 'Emphasis',
+  '`': 'InlineCode',
+  '~~': 'Strikethrough'
+}
+
+/**
+ * Wrap the selection in a marker pair — or, when the selection already sits
+ * inside a span of that same format (per the syntax tree), remove that
+ * span's markers instead. Repeated toggles alternate cleanly rather than
+ * piling `****` up. Inside `inline code` the other formats are no-ops:
+ * markdown cannot style text within code.
+ */
 function toggleWrap(marker: string) {
   return (view: EditorView): boolean => {
     const { from, to } = view.state.selection.main
+    const target = MARKER_NODE[marker]
+    for (
+      let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(from, from === to ? -1 : 1);
+      node;
+      node = node.parent
+    ) {
+      if (node.from > from || node.to < to) continue
+      if (node.name === target) {
+        // Unwrap: drop the opening and closing marks of the enclosing span.
+        const open = node.firstChild
+        const close = node.lastChild
+        if (open && close && close.from > open.to) {
+          view.dispatch({
+            changes: [
+              { from: open.from, to: open.to },
+              { from: close.from, to: close.to }
+            ]
+          })
+        }
+        return true
+      }
+      if (node.name === 'InlineCode' && marker !== '`') return true
+    }
     const selected = view.state.sliceDoc(from, to)
     const len = marker.length
-    if (selected.startsWith(marker) && selected.endsWith(marker) && selected.length >= 2 * len) {
-      view.dispatch({
-        changes: { from, to, insert: selected.slice(len, selected.length - len) },
-        selection: { anchor: from, head: to - 2 * len }
-      })
-    } else {
-      view.dispatch({
-        changes: { from, to, insert: marker + selected + marker },
-        selection: { anchor: from + len, head: to + len }
-      })
-    }
+    view.dispatch({
+      changes: { from, to, insert: marker + selected + marker },
+      selection: { anchor: from + len, head: to + len }
+    })
     return true
   }
 }
@@ -764,6 +842,8 @@ export async function createNoteEditor(
     onFocus(): void
     /** Right-click on an empty line offers block inserts; the host splits the note. */
     onInsert(kind: 'todo' | 'sql' | 'code'): void
+    /** Click on a [[wiki-link]]: open that note. */
+    onNavigate(name: string): void
   }
 ): Promise<NoteEditor> {
   const { markdown, markdownKeymap } = await import('@codemirror/lang-markdown')
@@ -797,6 +877,7 @@ export async function createNoteEditor(
         syntaxHighlighting(markdownHighlight),
         headingSpacingPlugin(),
         hrPlugin(),
+        wikiLinkPlugin(opts.onNavigate),
         imagePlugin(opts.resolveImage),
         // Pasting an image or video (screenshot, copied file) saves it next
         // to the document and inserts its markdown link at the caret.
