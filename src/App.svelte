@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { get } from 'svelte/store'
   import Sidebar from './lib/Sidebar.svelte'
   import DocView from './lib/DocView.svelte'
@@ -148,7 +148,10 @@
   async function openPath(path: string, fallbackToToday = false, keepTrail = false) {
     // Direct navigation (sidebar, shortcuts, delete) starts a fresh page
     // history; only wiki-link hops and crumb clicks preserve the trail.
-    if (!keepTrail) trail = []
+    if (!keepTrail) {
+      trail = []
+      openAtTop = false
+    }
     const r = root!
     if (path === 'ideas' || path === 'folder') {
       currentPath.set(path)
@@ -181,6 +184,16 @@
   // ---------- Wiki links ([[note-name]]) and their breadcrumb trail ----------
 
   let trail = $state<Array<{ path: string; title: string }>>([])
+  /** Wiki navigation opens the target at the top of the page (reading),
+   *  unlike direct navigation which drops the caret at the end (writing). */
+  let openAtTop = $state(false)
+
+  async function openForReading(path: string) {
+    openAtTop = true
+    await openPath(path, false, true)
+    await tick()
+    mainEl?.scrollTo({ top: 0 })
+  }
 
   /** Where the note behind a [[name]] lives: file name first (any notes/
    *  folder), then frontmatter title, then journal for date-shaped names. */
@@ -211,13 +224,13 @@
     if (cur && cur !== 'folder' && cur !== 'ideas') {
       trail = [...trail, { path: cur, title: displayTitle(cur) }]
     }
-    void openPath(target, false, true)
+    void openForReading(target)
   }
 
   function goBackTo(i: number) {
     const entry = trail[i]
     trail = trail.slice(0, i)
-    void openPath(entry.path, false, true)
+    void openForReading(entry.path)
   }
 
   const currentCrumbTitle = $derived.by(() => {
@@ -589,6 +602,7 @@
             onsaved={onDocSaved}
             onrequestdelete={requestDelete}
             onnavigate={openWikiLink}
+            startattop={openAtTop}
           />
         {/key}
       {/if}

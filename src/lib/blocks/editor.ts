@@ -500,7 +500,10 @@ function imagePlugin(resolve: ImageResolver): Extension {
   const build = (view: EditorView): DecorationSet => {
     const builder = new RangeSetBuilder<Decoration>()
     const sel = view.state.selection.ranges
-    const selectionInside = (from: number, to: number) => sel.some((r) => r.from < to && r.to > from)
+    // A blurred editor is all rendered: its stale selection must not keep
+    // raw markdown (or a selection highlight) on screen.
+    const selectionInside = (from: number, to: number) =>
+      view.hasFocus && sel.some((r) => r.from < to && r.to > from)
     for (const range of view.visibleRanges) {
       let pos = range.from
       while (pos <= range.to) {
@@ -530,7 +533,7 @@ function imagePlugin(resolve: ImageResolver): Extension {
     (view) => ({
       decorations: build(view),
       update(this: { decorations: DecorationSet }, update: ViewUpdate) {
-        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged || update.focusChanged) {
           this.decorations = build(update.view)
         }
       }
@@ -583,7 +586,8 @@ function wikiLinkPlugin(onNavigate: (name: string) => void): Extension {
   const build = (view: EditorView): DecorationSet => {
     const builder = new RangeSetBuilder<Decoration>()
     const sel = view.state.selection.ranges
-    const selectionInside = (from: number, to: number) => sel.some((r) => r.from < to && r.to > from)
+    const selectionInside = (from: number, to: number) =>
+      view.hasFocus && sel.some((r) => r.from < to && r.to > from)
     for (const range of view.visibleRanges) {
       let pos = range.from
       while (pos <= range.to) {
@@ -607,7 +611,7 @@ function wikiLinkPlugin(onNavigate: (name: string) => void): Extension {
     (view) => ({
       decorations: build(view),
       update(this: { decorations: DecorationSet }, update: ViewUpdate) {
-        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged || update.focusChanged) {
           this.decorations = build(update.view)
         }
       }
@@ -688,7 +692,7 @@ function hrPlugin(): Extension {
         enter(node) {
           if (node.name !== 'HorizontalRule') return
           const line = view.state.doc.lineAt(node.from)
-          if (sel.some((r) => r.from <= line.to && r.to >= line.from)) return
+          if (view.hasFocus && sel.some((r) => r.from <= line.to && r.to >= line.from)) return
           builder.add(line.from, line.to, Decoration.replace({ widget: new HrWidget() }))
         }
       })
@@ -700,7 +704,7 @@ function hrPlugin(): Extension {
     (view) => ({
       decorations: build(view),
       update(this: { decorations: DecorationSet }, update: ViewUpdate) {
-        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged || update.focusChanged) {
           this.decorations = build(update.view)
         }
       }
@@ -736,7 +740,7 @@ function hideMarkupPlugin(): Extension {
           const parent = node.node.parent
           const spanFrom = parent ? parent.from : from
           const spanTo = parent ? parent.to : to
-          if (sel.some((r) => r.from <= spanTo && r.to >= spanFrom)) return
+          if (view.hasFocus && sel.some((r) => r.from <= spanTo && r.to >= spanFrom)) return
           // "# Title" / "> quote": swallow the space after the mark too.
           if ((node.name === 'HeaderMark' || node.name === 'QuoteMark') && doc.sliceString(to, to + 1) === ' ') {
             to += 1
@@ -760,7 +764,7 @@ function hideMarkupPlugin(): Extension {
     (view) => ({
       decorations: build(view),
       update(this: { decorations: DecorationSet }, update: ViewUpdate) {
-        if (update.docChanged || update.selectionSet || update.viewportChanged) {
+        if (update.docChanged || update.selectionSet || update.viewportChanged || update.focusChanged) {
           this.decorations = build(update.view)
         }
       }

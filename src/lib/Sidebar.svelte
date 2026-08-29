@@ -285,7 +285,7 @@
       <ul>
         {#each $noteTree.folders as folder (folder.name)}
           {@const dir = `notes/${folder.name}`}
-          <li>
+          <li class="folder-li" class:open={isOpen(`folder:${folder.name}`)}>
             <button
               class="side-item side-group"
               class:open={isOpen(`folder:${folder.name}`)}

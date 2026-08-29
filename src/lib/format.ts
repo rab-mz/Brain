@@ -76,6 +76,39 @@ function runsOf(s: string): number {
   return (s.match(/`/g) ?? []).length
 }
 
+// ---------- Rendering (todo items show styled text while not editing) ----------
+
+const INLINE_RENDER_RE = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|~~[^~]+~~)/g
+
+const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/**
+ * Render one raw markdown line as HTML: **bold**, *italic*, `code`,
+ * ~~strike~~ (single level, matching what the toggles produce). Every
+ * span carries data-r = the raw offset of its first character, so a click
+ * on the rendered text maps back to a caret position in the raw string.
+ */
+export function renderInlineMarkdown(text: string): string {
+  let html = ''
+  let last = 0
+  INLINE_RENDER_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = INLINE_RENDER_RE.exec(text))) {
+    if (m.index > last) {
+      html += `<span data-r="${last}">${escapeHtml(text.slice(last, m.index))}</span>`
+    }
+    const token = m[0]
+    const len = token.startsWith('**') || token.startsWith('~~') ? 2 : 1
+    const cls = token.startsWith('**') ? 'tr-b' : token.startsWith('~~') ? 'tr-s' : token.startsWith('`') ? 'tr-c' : 'tr-i'
+    html += `<span class="${cls}" data-r="${m.index + len}">${escapeHtml(token.slice(len, token.length - len))}</span>`
+    last = m.index + token.length
+  }
+  if (last < text.length) {
+    html += `<span data-r="${last}">${escapeHtml(text.slice(last))}</span>`
+  }
+  return html
+}
+
 /** `*` must not eat one star of a `**` pair: italic is only present when
  *  the star run is odd; bold needs at least two. Other markers just fit. */
 function starRunFits(marker: string, run: number): boolean {

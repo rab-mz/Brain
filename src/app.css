@@ -298,6 +298,23 @@ textarea {
   border-left: 1px solid var(--border);
 }
 
+/* An open folder becomes one visual panel: header + its notes share a
+   tinted background, so what belongs to it is unmistakable. */
+.folder-li.open {
+  background: color-mix(in srgb, var(--bg3) 45%, transparent);
+  border-radius: 8px;
+  padding-bottom: 3px;
+  margin-bottom: 3px;
+}
+
+.folder-li.open > .side-group {
+  color: var(--fg);
+}
+
+.folder-li.open .side-nested {
+  border-left-color: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
 /* Drag & drop targets */
 .side-item.drop-before {
   box-shadow: 0 -2px 0 0 var(--accent);
@@ -862,6 +879,12 @@ textarea {
   background: color-mix(in srgb, var(--accent) 28%, transparent) !important;
 }
 
+/* Clicking into a todo (or anywhere else) must not leave the old
+   highlight painted in the now-blurred note editor. */
+.note-host .cm-editor:not(.cm-focused) .cm-selectionBackground {
+  background: transparent !important;
+}
+
 /* drawSelection already paints the selection above; if the native one keeps
    its color too, every drag shows two offset overlapping boxes. */
 .note-host .cm-content ::selection {
@@ -899,6 +922,41 @@ textarea {
 
 .todo-text.done {
   text-decoration: line-through;
+  color: var(--muted);
+}
+
+/* Rendered (non-editing) todo text: same box as the textarea so swapping
+   to edit mode never shifts the layout. */
+.todo-render {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  min-height: 1.45em;
+}
+
+.todo-render .tr-b {
+  font-weight: 700;
+}
+
+.todo-render .tr-i {
+  font-style: italic;
+  font-weight: 500;
+}
+
+.todo-render .tr-s {
+  text-decoration: line-through;
+}
+
+.todo-render .tr-c {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.9em;
+  color: var(--inline-code-fg);
+  background: var(--inline-code-bg);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.todo-render .todo-ph {
   color: var(--muted);
 }
 

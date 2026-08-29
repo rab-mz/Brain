@@ -64,18 +64,22 @@ export const noteTree = writable<NoteTree>({ files: [], folders: [] })
 /** File names (not paths) inside journal/. */
 export const journalFiles = writable<string[]>([])
 
-/** Hide markdown formatting characters (#, **, *…) while reading. */
+/** Hide markdown formatting characters (#, **, *…) while reading.
+ *  ON by default (formatting shows styled, markers only where the caret
+ *  is) — new key so everyone starts clean; the '#' button still toggles. */
 function initialHideMarkup(): boolean {
   try {
-    return localStorage.getItem('brain:hide-markup') === '1'
+    const v = localStorage.getItem('brain:hide-markup2')
+    if (v != null) return v === '1'
   } catch {
-    return false
+    // localStorage unavailable: fall through.
   }
+  return true
 }
 export const hideMarkup = writable<boolean>(initialHideMarkup())
 hideMarkup.subscribe((v) => {
   try {
-    localStorage.setItem('brain:hide-markup', v ? '1' : '0')
+    localStorage.setItem('brain:hide-markup2', v ? '1' : '0')
   } catch {
     // Ignore: preference just won't persist.
   }
