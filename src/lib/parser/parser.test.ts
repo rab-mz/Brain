@@ -111,6 +111,32 @@ describe('parseDocument', () => {
     expect(again.blocks).toEqual(doc.blocks)
   })
 
+  it('joins indented continuations even across blank lines', () => {
+    const md = [
+      "- [ ] Come funziona in pratica la **delega** all'intermediario sul portale",
+      '',
+      "      Fatture e Corrispettivi: cosa firma l'esercente, con che credenziali,",
+      '      cosa può fare il delegato, come si revoca',
+      '',
+      '- [ ] item successivo',
+      '',
+      'Paragrafo normale dopo la lista.',
+      ''
+    ].join('\n')
+    const doc = parseDocument(md)
+    expect(doc.blocks[0]).toEqual({
+      type: 'todo',
+      items: [
+        {
+          done: false,
+          text: "Come funziona in pratica la **delega** all'intermediario sul portale Fatture e Corrispettivi: cosa firma l'esercente, con che credenziali, cosa può fare il delegato, come si revoca"
+        }
+      ]
+    })
+    expect(doc.blocks[1]).toEqual({ type: 'todo', items: [{ done: false, text: 'item successivo' }] })
+    expect(doc.blocks[2]).toEqual({ type: 'note', text: 'Paragrafo normale dopo la lista.' })
+  })
+
   it('flattens indented nested todos into the same list', () => {
     const doc = parseDocument('- [ ] parent\n  - [x] child\n')
     expect(doc.blocks).toEqual([

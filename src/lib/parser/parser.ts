@@ -113,6 +113,17 @@ function parseBlocks(lines: string[], start: number): Block[] {
           i++
           continue
         }
+        // Blank line(s) followed by an indented continuation still belong
+        // to the item (a common hand-written shape); blanks before
+        // anything else end the block.
+        if (l.trim() === '') {
+          let j = i
+          while (j < lines.length && lines[j].trim() === '') j++
+          if (j < lines.length && /^[ \t]+\S/.test(lines[j])) {
+            i = j
+            continue
+          }
+        }
         break
       }
       blocks.push({ type: 'todo', items })
