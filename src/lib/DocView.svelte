@@ -14,8 +14,7 @@
     path,
     onsaved,
     onrequestdelete,
-    onnavigate,
-    startattop = false
+    onnavigate
   }: {
     root: FileSystemDirectoryHandle
     path: string
@@ -23,8 +22,6 @@
     onrequestdelete: () => void
     /** A [[wiki-link]] in a note was clicked: open that note. */
     onnavigate: (name: string) => void
-    /** Wiki-link navigation reads from the top: no caret-at-end autofocus. */
-    startattop?: boolean
   } = $props()
 
   let doc: BrainDoc | null = $state(null)
@@ -55,14 +52,8 @@
   // focused note at the cursor, and background clicks can focus the page.
   const noteApis = new WeakMap<object, NoteEditor>()
   let lastActiveNote: object | null = null
-  let autofocusTarget: object | null = null
   function onNoteReady(block: object, api: NoteEditor) {
     noteApis.set(block, api)
-    // The caret should be visible the moment a document opens.
-    if (block === autofocusTarget) {
-      autofocusTarget = null
-      api.focusEnd()
-    }
   }
   function onNoteActive(block: object) {
     lastActiveNote = block
@@ -100,24 +91,14 @@
     const parsed = parseDocument(text)
     parsed.blocks = normalizeBlocks(parsed.blocks)
     doc = parsed
-    // Entering a document always selects the end of the last line, caret
-    // blinking. Set the target BEFORE rendering so onNoteReady can never
-    // race past it. IMPORTANT: read it through `doc` (the reactive proxy)
-    // — child components receive proxied blocks, so comparing against the
-    // raw parsed object would never match.
-    const blocks = doc!.blocks
-    // Arriving through a wiki-link is for reading: stay at the top of the
-    // page instead of dropping the caret (and the scroll) to the end.
-    if (startattop) return
-    // A note without a name yet (fresh "+" creation) opens on the title
-    // input instead, so typing the name is the natural next gesture.
+    // Documents open reading from the top — no caret parked at the end
+    // (it used to drag the scroll to the bottom of long notes). The only
+    // exception: a note without a name yet (fresh "+" creation) opens on
+    // the title input, so typing the name is the natural next gesture.
     if (!isJournal && !(parsed.frontmatter.title ?? '').trim()) {
       await tick()
       titleInput?.focus()
-      return
     }
-    autofocusTarget = blocks[blocks.length - 1]
-    await tick()
   })
 
   // Files are the source of truth: pick up external edits on window focus.

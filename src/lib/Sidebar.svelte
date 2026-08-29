@@ -2,18 +2,23 @@
   import { noteTree, journalFiles, fileTitles, currentPath, sidebarCollapsed } from './stores'
   import { t, lang, formatDayList, formatDayShort, formatMonth, type Lang } from './i18n'
   import { focusOnMount } from './actions'
+  import { autoFolderColor, type FolderColors } from './fs/sidebar-order'
   import FolderIcon from './FolderIcon.svelte'
 
   let {
     rootName,
+    colors = {},
     onopen,
     oncreate,
     oncreatefolder,
     onmovenote,
     onmovefolder,
+    oncolor,
     onexport
   }: {
     rootName: string
+    /** Manual folder colors; folders not listed get an automatic hue. */
+    colors?: FolderColors
     onopen: (path: string) => void
     oncreate: (title: string) => void
     oncreatefolder: (name: string) => void
@@ -21,8 +26,41 @@
     onmovenote: (path: string, targetDir: string, beforeName: string | null) => void
     /** Reorder folders: beforeName === null appends at the end. */
     onmovefolder: (name: string, beforeName: string | null) => void
+    /** Pick a folder color; null returns it to the automatic one. */
+    oncolor: (name: string, color: string | null) => void
     onexport: () => void
   } = $props()
+
+  // ---------- Folder colors (right-click a folder to pick) ----------
+
+  function folderColor(name: string): string {
+    return colors[name] ?? autoFolderColor(name)
+  }
+
+  const SWATCHES = ['#e5484d', '#f76b15', '#ffb224', '#30a46c', '#12a594', '#0091ff', '#6e56cf', '#e93d82', '#8d8d8d']
+
+  let colorPick = $state<{ name: string; x: number; y: number } | null>(null)
+
+  function openColorPick(e: MouseEvent, name: string) {
+    e.preventDefault()
+    colorPick = { name, x: e.clientX, y: e.clientY }
+  }
+
+  /** The native color input wants #rrggbb; normalize hsl() through canvas. */
+  function toHex(color: string): string {
+    if (color.startsWith('#')) return color
+    const ctx = document.createElement('canvas').getContext('2d')!
+    ctx.fillStyle = color
+    return ctx.fillStyle
+  }
+
+  function onWindowPointerDown(e: PointerEvent) {
+    if (colorPick && !(e.target as HTMLElement).closest('.color-pop')) colorPick = null
+  }
+
+  function onWindowKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') colorPick = null
+  }
 
   let newFolderOpen = $state(false)
   let newFolderName = $state('')
@@ -249,6 +287,8 @@
   }
 </script>
 
+<svelte:window onpointerdown={onWindowPointerDown} onkeydown={onWindowKeydown} />
+
 <aside class="sidebar">
   <div class="side-head">
     <span class="logo">Brain</span>
@@ -285,7 +325,7 @@
       <ul>
         {#each $noteTree.folders as folder (folder.name)}
           {@const dir = `notes/${folder.name}`}
-          <li class="folder-li" class:open={isOpen(`folder:${folder.name}`)}>
+          <li class="folder-li" class:open={isOpen(`folder:${folder.name}`)} style="--fc: {folderColor(folder.name)}">
             <button
               class="side-item side-group"
               class:open={isOpen(`folder:${folder.name}`)}
@@ -293,6 +333,7 @@
               class:drop-before={dropBeforeFolder === folder.name}
               draggable="true"
               onclick={() => toggleOpen(`folder:${folder.name}`)}
+              oncontextmenu={(e) => openColorPick(e, folder.name)}
               ondragstart={(e) => onFolderDragStart(e, folder.name)}
               ondragend={onDragEnd}
               ondragover={(e) => onFolderHeaderDragOver(e, folder.name, dir)}
@@ -421,6 +462,46 @@
     <p class="side-hint">{$t('sidebar.hint')}</p>
   </div>
 </aside>
+
+{#if colorPick}
+  {@const pick = colorPick}
+  <div class="color-pop" style="left: {Math.min(pick.x, window.innerWidth - 236)}px; top: {Math.min(pick.y, window.innerHeight - 110)}px">
+    <div class="color-row">
+      {#each SWATCHES as c (c)}
+        <button
+          class="color-swatch"
+          class:sel={colors[pick.name] === c}
+          style="background: {c}"
+          aria-label={c}
+          onclick={() => {
+            oncolor(pick.name, c)
+            colorPick = null
+          }}
+        ></button>
+      {/each}
+    </div>
+    <div class="color-actions">
+      <label class="color-custom">
+        <span class="color-swatch color-rainbow" aria-hidden="true"></span>
+        {$t('folder.colorCustom')}
+        <input
+          type="color"
+          value={toHex(folderColor(pick.name))}
+          onchange={(e) => oncolor(pick.name, (e.currentTarget as HTMLInputElement).value)}
+        />
+      </label>
+      <button
+        class="color-auto"
+        onclick={() => {
+          oncolor(pick.name, null)
+          colorPick = null
+        }}
+      >
+        {$t('folder.colorAuto')}
+      </button>
+    </div>
+  </div>
+{/if}
 
 {#snippet month(monthGroup: { month: string; days: string[] })}
   {@const visibleDays = monthGroup.days.filter((d) => d !== today)}

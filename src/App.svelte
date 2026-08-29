@@ -22,7 +22,13 @@
     readFile,
     deleteFile
   } from './lib/fs/files'
-  import { loadSidebarOrder, saveSidebarOrder, applyOrder, type SidebarOrder } from './lib/fs/sidebar-order'
+  import {
+    loadSidebarPrefs,
+    saveSidebarPrefs,
+    applyOrder,
+    type SidebarOrder,
+    type FolderColors
+  } from './lib/fs/sidebar-order'
   import {
     appState,
     noteTree,
@@ -54,6 +60,18 @@
   let confirmDelete: { path: string; title: string } | null = $state(null)
   let lastIndexJson = ''
   let sidebarOrder: SidebarOrder = {}
+  let folderColors = $state<FolderColors>({})
+
+  function savePrefs() {
+    return saveSidebarPrefs(root!, { order: sidebarOrder, colors: folderColors })
+  }
+
+  async function setFolderColor(name: string, color: string | null) {
+    if (color) folderColors[name] = color
+    else delete folderColors[name]
+    folderColors = { ...folderColors }
+    await savePrefs()
+  }
 
   onMount(async () => {
     if (!supportsFS()) {
@@ -93,8 +111,9 @@
   async function init() {
     const r = root!
     await ensureStructure(r)
-    const [journal, order] = await Promise.all([listMarkdown(r, 'journal'), loadSidebarOrder(r)])
-    sidebarOrder = order
+    const [journal, prefs] = await Promise.all([listMarkdown(r, 'journal'), loadSidebarPrefs(r)])
+    sidebarOrder = prefs.order
+    folderColors = prefs.colors
     await refreshNoteTree()
     journalFiles.set(journal)
     appState.set('ready')
@@ -148,10 +167,7 @@
   async function openPath(path: string, fallbackToToday = false, keepTrail = false) {
     // Direct navigation (sidebar, shortcuts, delete) starts a fresh page
     // history; only wiki-link hops and crumb clicks preserve the trail.
-    if (!keepTrail) {
-      trail = []
-      openAtTop = false
-    }
+    if (!keepTrail) trail = []
     const r = root!
     if (path === 'ideas' || path === 'folder') {
       currentPath.set(path)
@@ -161,6 +177,7 @@
           localStorage.setItem('brain:last-doc', 'ideas')
         } catch {}
       }
+      await scrollDocToTop()
       return
     }
     if (!(await fileExists(r, path))) {
@@ -179,21 +196,20 @@
     try {
       localStorage.setItem('brain:last-doc', path)
     } catch {}
+    await scrollDocToTop()
+  }
+
+  // Every document opens reading from the top: no caret parked at the end
+  // dragging the scroll down with it. The caret appears where you click
+  // (a fresh unnamed note still focuses its title).
+  async function scrollDocToTop() {
+    await tick()
+    mainEl?.scrollTo({ top: 0 })
   }
 
   // ---------- Wiki links ([[note-name]]) and their breadcrumb trail ----------
 
   let trail = $state<Array<{ path: string; title: string }>>([])
-  /** Wiki navigation opens the target at the top of the page (reading),
-   *  unlike direct navigation which drops the caret at the end (writing). */
-  let openAtTop = $state(false)
-
-  async function openForReading(path: string) {
-    openAtTop = true
-    await openPath(path, false, true)
-    await tick()
-    mainEl?.scrollTo({ top: 0 })
-  }
 
   /** Where the note behind a [[name]] lives: file name first (any notes/
    *  folder), then frontmatter title, then journal for date-shaped names. */
@@ -224,13 +240,13 @@
     if (cur && cur !== 'folder' && cur !== 'ideas') {
       trail = [...trail, { path: cur, title: displayTitle(cur) }]
     }
-    void openForReading(target)
+    void openPath(target, false, true)
   }
 
   function goBackTo(i: number) {
     const entry = trail[i]
     trail = trail.slice(0, i)
-    void openForReading(entry.path)
+    void openPath(entry.path, false, true)
   }
 
   const currentCrumbTitle = $derived.by(() => {
@@ -290,7 +306,12 @@
     if (folderOrder) {
       sidebarOrder[FOLDERS_ORDER_KEY] = folderOrder.map((n) => (n === oldName ? clean : n))
     }
-    await saveSidebarOrder(r, sidebarOrder)
+    if (folderColors[oldName]) {
+      folderColors[clean] = folderColors[oldName]
+      delete folderColors[oldName]
+      folderColors = { ...folderColors }
+    }
+    await savePrefs()
     for (const file of folder?.files ?? []) {
       renamePathEverywhere(`notes/${oldName}/${file}`, `notes/${clean}/${file}`)
     }
@@ -341,7 +362,7 @@
     else targetList.push(finalName)
     sidebarOrder[fromDir] = fromDir === targetDir ? targetList : fromList
     sidebarOrder[targetDir] = targetList
-    await saveSidebarOrder(r, sidebarOrder)
+    await savePrefs()
     await refreshNoteTree()
   }
 
@@ -353,7 +374,7 @@
     if (at >= 0) names.splice(at, 0, name)
     else names.push(name)
     sidebarOrder[FOLDERS_ORDER_KEY] = names
-    await saveSidebarOrder(root!, sidebarOrder)
+    await savePrefs()
     await refreshNoteTree()
   }
 
@@ -570,11 +591,13 @@
     {#if !$sidebarCollapsed}
       <Sidebar
         rootName={root?.name ?? ''}
+        colors={folderColors}
         onopen={(p) => openPath(p)}
         oncreate={createNote}
         oncreatefolder={createNoteFolder}
         onmovenote={moveNote}
         onmovefolder={moveFolder}
+        oncolor={setFolderColor}
         onexport={exportJson}
       />
     {:else}
@@ -602,7 +625,6 @@
             onsaved={onDocSaved}
             onrequestdelete={requestDelete}
             onnavigate={openWikiLink}
-            startattop={openAtTop}
           />
         {/key}
       {/if}
