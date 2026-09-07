@@ -13,7 +13,14 @@ import {
   type DecorationSet,
   type ViewUpdate
 } from '@codemirror/view'
-import { EditorState, Compartment, RangeSetBuilder, type Extension } from '@codemirror/state'
+import {
+  EditorState,
+  Compartment,
+  RangeSetBuilder,
+  StateEffect,
+  StateField,
+  type Extension
+} from '@codemirror/state'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import {
   bracketMatching,
@@ -29,6 +36,22 @@ import type { SyntaxNode } from '@lezer/common'
 import { get } from 'svelte/store'
 import { showToast } from '../stores'
 import { showMenu } from '../menu'
+import { FORMATS, renderInlineMarkdown } from '../format'
+import {
+  deleteColumn,
+  deleteRow,
+  emptyTable,
+  insertColumn,
+  insertRow,
+  parseTable,
+  serializeTable,
+  setAlign,
+  tidyTable,
+  toGrid,
+  unflattenTable,
+  type Align,
+  type ParsedTable
+} from '../table'
 import { t } from '../i18n'
 
 async function languageExtension(language: string): Promise<Extension> {
@@ -713,6 +736,224 @@ function hrPlugin(): Extension {
   )
 }
 
+// ---------- Tables ----------
+
+// Whether the editor has focus is view state, but a widget that swallows
+// line breaks may only come from the state (plugins cannot change the
+// document's block structure) — so focus is mirrored into the field.
+const setTableFocus = StateEffect.define<boolean>()
+
+/** Caret offset for a click on rendered markdown: the cell carries the raw
+ *  offset of its content, the spans inside their offset within the cell. */
+function rawOffsetAt(e: MouseEvent, cell: HTMLElement): number {
+  const base = Number(cell.dataset.base)
+  const range = document.caretRangeFromPoint?.(e.clientX, e.clientY)
+  if (!range) return base
+  const node = range.startContainer
+  const el = node instanceof Element ? node : node.parentElement
+  const r = el?.closest<HTMLElement>('[data-r]')?.dataset.r
+  if (r == null || !cell.contains(el)) return base
+  return base + Number(r) + range.startOffset
+}
+
+/** Replace the table's source with `text` (one undoable step). */
+function replaceTable(view: EditorView, from: number, src: string, text: string): void {
+  // The widget is rebuilt on every doc change, but a menu can outlive its
+  // table (an edit from elsewhere): only write when the source still matches.
+  if (view.state.doc.sliceString(from, from + src.length) !== src) return
+  view.dispatch({ changes: { from, to: from + src.length, insert: text } })
+}
+
+/** Render a table (GFM pipe syntax) as a real table. */
+class TableWidget extends WidgetType {
+  constructor(
+    readonly src: string,
+    readonly from: number,
+    readonly table: ParsedTable
+  ) {
+    super()
+  }
+
+  eq(other: TableWidget): boolean {
+    return other.src === this.src && other.from === this.from
+  }
+
+  toDOM(view: EditorView): HTMLElement {
+    const wrap = document.createElement('div')
+    wrap.className = 'cm-table-widget'
+    // Wide tables scroll inside their own box: the note column never does.
+    const scroll = document.createElement('div')
+    scroll.className = 'cm-table-scroll'
+    const el = document.createElement('table')
+    const { table } = this
+    const lines = [table.header, ...table.body]
+
+    lines.forEach((line, r) => {
+      const tr = document.createElement('tr')
+      for (let c = 0; c < table.cols; c++) {
+        const cellNode = document.createElement(r === 0 ? 'th' : 'td')
+        const cell = line.cells[c]
+        const align = table.align[c]
+        if (align) cellNode.style.textAlign = align
+        // Missing trailing cells (a short row) still take a caret: their
+        // click lands at the end of that row's line.
+        cellNode.dataset.base = String(this.from + (cell ? cell.from : line.to))
+        cellNode.dataset.row = String(r)
+        cellNode.dataset.col = String(c)
+        if (cell && cell.text !== '') cellNode.innerHTML = renderInlineMarkdown(cell.text)
+        else cellNode.innerHTML = '<span data-r="0" class="cm-table-empty"></span>'
+        tr.appendChild(cellNode)
+      }
+      ;(r === 0 ? el.createTHead() : (el.tBodies[0] ?? el.createTBody())).appendChild(tr)
+    })
+
+    // A click puts the caret in the raw markdown exactly where it landed:
+    // the widget disappears and the pipes come back, ready to edit.
+    el.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return
+      const cell = (e.target as HTMLElement).closest<HTMLElement>('[data-base]')
+      if (!cell) return
+      e.preventDefault()
+      const pos = rawOffsetAt(e, cell)
+      view.dispatch({ selection: { anchor: Math.min(pos, view.state.doc.length) } })
+      view.focus()
+    })
+
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const cell = (e.target as HTMLElement).closest<HTMLElement>('[data-base]')
+      const row = cell ? Number(cell.dataset.row) : 0
+      const col = cell ? Number(cell.dataset.col) : 0
+      showMediaMenu(e.clientX, e.clientY, this.menuItems(view, row, col))
+    })
+
+    scroll.appendChild(el)
+    wrap.appendChild(scroll)
+    return wrap
+  }
+
+  /** Structural edits, applied by rewriting the whole (re-aligned) table. */
+  private menuItems(view: EditorView, row: number, col: number) {
+    const grid = toGrid(this.table)
+    const align = this.table.align
+    const write = (g: string[][], a: Align[] = align) =>
+      replaceTable(view, this.from, this.src, serializeTable(g, a))
+    const both = (r: [string[][], Align[]]) => write(r[0], r[1])
+    const tr = (key: string) => get(t)(key)
+    return [
+      { label: tr('table.rowAbove'), run: () => write(insertRow(grid, row)) },
+      { label: tr('table.rowBelow'), run: () => write(insertRow(grid, row + 1)) },
+      { label: tr('table.delRow'), run: () => write(deleteRow(grid, row)) },
+      { label: tr('table.colBefore'), run: () => both(insertColumn(grid, align, col)) },
+      { label: tr('table.colAfter'), run: () => both(insertColumn(grid, align, col + 1)) },
+      { label: tr('table.delCol'), run: () => both(deleteColumn(grid, align, col)) },
+      { label: tr('table.alignLeft'), run: () => write(grid, setAlign(align, col, 'left')) },
+      { label: tr('table.alignCenter'), run: () => write(grid, setAlign(align, col, 'center')) },
+      { label: tr('table.alignRight'), run: () => write(grid, setAlign(align, col, 'right')) },
+      { label: tr('table.tidy'), run: () => write(grid) },
+      { label: tr('table.delete'), run: () => replaceTable(view, this.from, this.src, '') }
+    ]
+  }
+
+  // The widget owns its events (click-to-caret and the menu are both
+  // computed from the cell under the pointer, which CodeMirror cannot map
+  // on its own — the rendered text has no position in the document).
+  ignoreEvent(): boolean {
+    return true
+  }
+}
+
+/**
+ * Replace every pipe table with a rendered one. Like the images and the
+ * `---` rules, the raw markdown comes back while the selection is inside
+ * it, so the table stays editable as plain text in place.
+ */
+function tableExtension(): Extension {
+  const build = (state: EditorState, focused: boolean): DecorationSet => {
+    const builder = new RangeSetBuilder<Decoration>()
+    const sel = state.selection.ranges
+    syntaxTree(state).iterate({
+      enter(node) {
+        if (node.name !== 'Table') return
+        const first = state.doc.lineAt(node.from)
+        // The node may or may not include the newline closing the last row.
+        const last = state.doc.lineAt(Math.max(node.from, node.to - 1))
+        if (focused && sel.some((r) => r.from <= last.to && r.to >= first.from)) return
+        const src = state.doc.sliceString(first.from, last.to)
+        const table = parseTable(src)
+        if (!table) return
+        builder.add(
+          first.from,
+          last.to,
+          Decoration.replace({ widget: new TableWidget(src, first.from, table), block: true })
+        )
+      }
+    })
+    return builder.finish()
+  }
+
+  const field = StateField.define<{ focused: boolean; deco: DecorationSet }>({
+    create: (state) => ({ focused: false, deco: build(state, false) }),
+    update(value, tr) {
+      let focused = value.focused
+      for (const e of tr.effects) if (e.is(setTableFocus)) focused = e.value
+      if (!tr.docChanged && !tr.selection && focused === value.focused) return value
+      return { focused, deco: build(tr.state, focused) }
+    },
+    provide: (f) => EditorView.decorations.from(f, (v) => v.deco)
+  })
+
+  return [field, EditorView.focusChangeEffect.of((_, focusing) => setTableFocus.of(focusing))]
+}
+
+/** Table markdown for pasted text: a ragged table gets its columns lined
+ *  up, one squashed onto a single line gets its rows back. */
+function tableFromPaste(text: string): string | null {
+  const trimmed = text.trim()
+  if (!trimmed.includes('|')) return null
+  return tidyTable(trimmed) ?? unflattenTable(trimmed)
+}
+
+/** Insert table markdown at the caret, on lines of its own, and leave the
+ *  caret one blank line below (so the table shows up rendered, and whatever
+ *  is typed next — another pasted table included — starts its own block).
+ *  Returns the offset the table starts at. */
+function insertTable(view: EditorView, text: string): number {
+  const { from, to } = view.state.selection.main
+  const doc = view.state.doc
+  const before = doc.sliceString(doc.lineAt(from).from, from).trim() === '' ? '' : '\n\n'
+  const rest = doc.sliceString(to, doc.lineAt(to).to).trim() !== ''
+  const insert = before + text + '\n\n' + (rest ? '\n' : '')
+  view.dispatch({
+    changes: { from, to, insert },
+    selection: { anchor: from + before.length + text.length + 2 },
+    scrollIntoView: true
+  })
+  return from + before.length
+}
+
+/** New empty table from the insert menu: the first header cell is selected
+ *  so naming the columns is just typing. */
+function insertNewTable(view: EditorView): void {
+  const first = 'Col 1'
+  const at = insertTable(view, emptyTable())
+  view.dispatch({ selection: { anchor: at + 2, head: at + 2 + first.length } })
+  view.focus()
+}
+
+/** The inline formatting entries of the right-click menu (shared by the
+ *  plain-text branch and the "convert to table" one). */
+function formatMenuItems(view: EditorView): Array<{ label: string; run(): void }> {
+  return FORMATS.map(([key, marker]) => ({
+    label: get(t)(key),
+    run: () => {
+      toggleWrap(marker)(view)
+      view.focus()
+    }
+  }))
+}
+
 // ---------- Hide markdown formatting ----------
 
 // Marks hidden in "clean" mode. List bullets stay: they carry meaning.
@@ -851,7 +1092,7 @@ export async function createNoteEditor(
   }
 ): Promise<NoteEditor> {
   const { markdown, markdownKeymap } = await import('@codemirror/lang-markdown')
-  const { Strikethrough } = await import('@lezer/markdown')
+  const { Strikethrough, Table } = await import('@lezer/markdown')
 
   const markupCompartment = new Compartment()
 
@@ -877,10 +1118,12 @@ export async function createNoteEditor(
         // as visual separators and headings are always written with `#`.
         // Strikethrough (GFM) is added on top of commonmark so the menu's
         // ~~strike~~ renders styled instead of as raw tildes.
-        markdown({ extensions: [Strikethrough, { remove: ['SetextHeading'] }] }),
+        // Table (GFM) too: pipe tables render as real tables.
+        markdown({ extensions: [Strikethrough, Table, { remove: ['SetextHeading'] }] }),
         syntaxHighlighting(markdownHighlight),
         headingSpacingPlugin(),
         hrPlugin(),
+        tableExtension(),
         wikiLinkPlugin(opts.onNavigate),
         imagePlugin(opts.resolveImage),
         // Pasting an image or video (screenshot, copied file) saves it next
@@ -888,7 +1131,16 @@ export async function createNoteEditor(
         EditorView.domEventHandlers({
           paste: (event, v) => {
             const files = [...(event.clipboardData?.files ?? [])].filter(isMediaFile)
-            if (files.length === 0) return false
+            if (files.length === 0) {
+              // Copied tables arrive either ragged or (from anywhere that
+              // keeps a single line) with their rows glued together; both
+              // land as a properly formatted table.
+              const table = tableFromPaste(event.clipboardData?.getData('text/plain') ?? '')
+              if (!table) return false
+              event.preventDefault()
+              insertTable(v, table)
+              return true
+            }
             event.preventDefault()
             void (async () => {
               for (const file of files) {
@@ -922,7 +1174,9 @@ export async function createNoteEditor(
           // alone: they bring up their own menu (copy, download, remove).
           contextmenu: (event, v) => {
             const target = event.target as HTMLElement
-            if (target.closest('.cm-image-widget, .cm-video-widget, .cm-file-widget')) return false
+            if (target.closest('.cm-image-widget, .cm-video-widget, .cm-file-widget, .cm-table-widget')) {
+              return false
+            }
             const pos = v.posAtCoords({ x: event.clientX, y: event.clientY }, false)
             event.preventDefault()
             const sel = v.state.selection.main
@@ -935,26 +1189,28 @@ export async function createNoteEditor(
             v.focus()
             const cur = v.state.selection.main
             const emptyLine = cur.empty && v.state.doc.lineAt(pos).text.trim() === ''
+            // A line that is a whole table squashed into one (pasted
+            // from a chat, a todo item…) offers to become a real table.
+            const flat = emptyLine ? null : unflattenTable(v.state.doc.lineAt(pos).text)
             const items = emptyLine
               ? [
                   { label: get(t)('insert.todo'), run: () => opts.onInsert('todo') },
+                  { label: get(t)('insert.table'), run: () => insertNewTable(v) },
                   { label: 'SQL', run: () => opts.onInsert('sql') },
                   { label: get(t)('insert.code'), run: () => opts.onInsert('code') }
                 ]
-              : (
-                  [
-                    ['fmt.bold', '**'],
-                    ['fmt.italic', '*'],
-                    ['fmt.code', '`'],
-                    ['fmt.strike', '~~']
-                  ] as const
-                ).map(([key, marker]) => ({
-                  label: get(t)(key),
-                  run: () => {
-                    toggleWrap(marker)(v)
-                    v.focus()
-                  }
-                }))
+              : flat
+                ? [
+                    {
+                      label: get(t)('table.convert'),
+                      run: () => {
+                        const line = v.state.doc.lineAt(pos)
+                        v.dispatch({ changes: { from: line.from, to: line.to, insert: flat } })
+                      }
+                    },
+                    ...formatMenuItems(v)
+                  ]
+                : formatMenuItems(v)
             showMediaMenu(event.clientX, event.clientY, items)
             return true
           }

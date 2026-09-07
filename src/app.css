@@ -827,6 +827,53 @@ textarea {
   border-radius: 1px;
 }
 
+/* Pipe tables rendered as real tables. Clicking a cell drops the caret
+   into the raw markdown at that exact spot, so editing stays in place. */
+.cm-table-widget {
+  padding: 0.35em 0;
+  cursor: text;
+}
+
+/* A wide table scrolls inside its own box; the note column never does. */
+.cm-table-scroll {
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.cm-table-widget table {
+  border-collapse: collapse;
+  /* Exactly the note column, never wider: inside CodeMirror anything wider
+     stretches the whole content (whose overflow is hidden) and would clip
+     the prose around it. Long cells wrap instead. */
+  width: 100%;
+  table-layout: auto;
+  font-size: 0.95em;
+  line-height: 1.5;
+}
+
+.cm-table-widget th,
+.cm-table-widget td {
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  text-align: left;
+  vertical-align: top;
+  /* Break inside a word only when it cannot fit on a line of its own: the
+     editor's `anywhere` would chop paths and code spans in half. */
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.cm-table-widget th {
+  font-weight: 700;
+  background: var(--inline-code-bg);
+}
+
+/* An empty cell still needs a line's worth of height to be clickable. */
+.cm-table-empty {
+  display: inline-block;
+  min-height: 1.5em;
+}
+
 /* [[wiki-link]] to another note, wikipedia style. The brackets are hidden
    while reading; arrow keys into the range reveal the raw markdown. */
 .cm-wikilink {
@@ -1018,20 +1065,20 @@ textarea {
   min-height: 1.45em;
 }
 
-.todo-render .tr-b {
+:is(.todo-render, .cm-table-widget) .tr-b {
   font-weight: 700;
 }
 
-.todo-render .tr-i {
+:is(.todo-render, .cm-table-widget) .tr-i {
   font-style: italic;
   font-weight: 500;
 }
 
-.todo-render .tr-s {
+:is(.todo-render, .cm-table-widget) .tr-s {
   text-decoration: line-through;
 }
 
-.todo-render .tr-c {
+:is(.todo-render, .cm-table-widget) .tr-c {
   font-family: ui-monospace, 'SF Mono', Menlo, monospace;
   font-size: 0.9em;
   color: var(--inline-code-fg);
