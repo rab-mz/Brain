@@ -539,9 +539,10 @@ textarea {
   flex-direction: column;
 }
 
+/* Document column width, cycled from the right bar (see --doc-max below). */
 .doc-inner {
   width: 100%;
-  max-width: 720px;
+  max-width: var(--doc-max, 720px);
   margin: 0 auto;
   padding: 36px 48px 18vh;
   font-family: var(--doc-font);
@@ -550,9 +551,18 @@ textarea {
   flex: 1;
 }
 
+:root[data-width='wide'] {
+  --doc-max: 1080px;
+}
+
+/* Full: the whole main area, minus the page padding. */
+:root[data-width='full'] {
+  --doc-max: none;
+}
+
 .ideas,
 .folder-view {
-  max-width: 720px;
+  max-width: var(--doc-max, 720px);
   margin: 0 auto;
   padding: 36px 28px 20vh;
 }
@@ -834,18 +844,44 @@ textarea {
   cursor: text;
 }
 
-/* A wide table scrolls inside its own box; the note column never does. */
+/* A wide table scrolls inside its own box; the note column never does.
+   The width has to be the editor's own, in pixels (--cm-table-w, published
+   by the editor): with `auto` the box would grow to the table and stretch
+   the whole content instead of scrolling. */
 .cm-table-scroll {
+  width: var(--cm-table-w, 100%);
   overflow-x: auto;
-  max-width: 100%;
+  overscroll-behavior-x: contain;
+  /* Styling the bar makes it permanent instead of an overlay that fades
+     out: on a table wider than the column it is the only hint that there
+     is more to the right. */
+  scrollbar-width: thin;
+}
+
+.cm-table-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.cm-table-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.cm-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+.cm-table-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .cm-table-widget table {
   border-collapse: collapse;
-  /* Exactly the note column, never wider: inside CodeMirror anything wider
-     stretches the whole content (whose overflow is hidden) and would clip
-     the prose around it. Long cells wrap instead. */
-  width: 100%;
+  /* Columns take the width their content needs — squeezing them into the
+     note column is what broke wide tables — and the box above scrolls when
+     the total exceeds it. A small table still fills the column. */
+  width: max-content;
+  min-width: 100%;
   table-layout: auto;
   font-size: 0.95em;
   line-height: 1.5;
@@ -861,6 +897,8 @@ textarea {
      editor's `anywhere` would chop paths and code spans in half. */
   overflow-wrap: break-word;
   word-break: normal;
+  /* A very long cell wraps rather than pushing the table metres wide. */
+  max-width: 26em;
 }
 
 .cm-table-widget th {
@@ -1372,6 +1410,12 @@ textarea {
 .right-bar .font-btn {
   font-family: var(--doc-font);
   font-weight: 700;
+}
+
+/* Column width cycle: lit up while the note is wider than the default. */
+.right-bar .width-btn.on {
+  color: var(--accent);
+  background: var(--bg2);
 }
 
 /* Markup visibility toggle: lit up while formatting is hidden. */

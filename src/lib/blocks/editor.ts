@@ -865,6 +865,33 @@ class TableWidget extends WidgetType {
 }
 
 /**
+ * Publish the editor's width as `--cm-table-w` on the content element.
+ * A table box must be given a width in pixels: left to the layout it would
+ * take its content's width, stretching `.cm-content` (whose overflow is
+ * hidden) and clipping the table AND the prose around it. The scroller's
+ * width comes from the page, not from the content, so there is no loop.
+ */
+function tableWidthPlugin(): Extension {
+  const publish = (view: EditorView) =>
+    view.requestMeasure({
+      read: (v) => v.scrollDOM.clientWidth,
+      write: (width, v) => {
+        // The content keeps 2px of right padding for the drawn caret.
+        v.contentDOM.style.setProperty('--cm-table-w', Math.max(0, width - 2) + 'px')
+      }
+    })
+
+  return ViewPlugin.define((view) => {
+    publish(view)
+    return {
+      update(update: ViewUpdate) {
+        if (update.geometryChanged) publish(update.view)
+      }
+    }
+  })
+}
+
+/**
  * Replace every pipe table with a rendered one. Like the images and the
  * `---` rules, the raw markdown comes back while the selection is inside
  * it, so the table stays editable as plain text in place.
@@ -1124,6 +1151,7 @@ export async function createNoteEditor(
         headingSpacingPlugin(),
         hrPlugin(),
         tableExtension(),
+        tableWidthPlugin(),
         wikiLinkPlugin(opts.onNavigate),
         imagePlugin(opts.resolveImage),
         // Pasting an image or video (screenshot, copied file) saves it next

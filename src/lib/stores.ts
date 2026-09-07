@@ -57,6 +57,31 @@ font.subscribe((f) => {
   if (typeof document !== 'undefined') document.documentElement.dataset.font = f
 })
 
+/** Width of the document column. Wide tables and code-heavy notes want more
+ *  room than the comfortable reading measure, so it is a per-user setting. */
+export type DocWidth = 'normal' | 'wide' | 'full'
+export const DOC_WIDTHS: DocWidth[] = ['normal', 'wide', 'full']
+
+function initialDocWidth(): DocWidth {
+  try {
+    const w = localStorage.getItem('brain:doc-width')
+    if ((DOC_WIDTHS as string[]).includes(w ?? '')) return w as DocWidth
+  } catch {
+    // Fall through.
+  }
+  return 'normal'
+}
+
+export const docWidth = writable<DocWidth>(initialDocWidth())
+docWidth.subscribe((w) => {
+  try {
+    localStorage.setItem('brain:doc-width', w)
+  } catch {
+    // Ignore: width just won't persist.
+  }
+  if (typeof document !== 'undefined') document.documentElement.dataset.width = w
+})
+
 export const sidebarCollapsed = writable(false)
 
 /** notes/ listing with one level of user folders, in the user's manual order. */

@@ -42,8 +42,10 @@
     showToast,
     theme,
     font,
+    docWidth,
     THEMES,
-    FONTS
+    FONTS,
+    DOC_WIDTHS
   } from './lib/stores'
   import { t, lang, formatDayFull } from './lib/i18n'
   import {
@@ -518,6 +520,10 @@
     font.update((current) => FONTS[(FONTS.indexOf(current) + 1) % FONTS.length])
   }
 
+  function cycleDocWidth() {
+    docWidth.update((current) => DOC_WIDTHS[(DOC_WIDTHS.indexOf(current) + 1) % DOC_WIDTHS.length])
+  }
+
   function toggleFullscreen() {
     if (document.fullscreenElement) {
       void document.exitFullscreen()
@@ -634,6 +640,7 @@
       ondownload={downloadTxt}
       oncycletheme={cycleTheme}
       oncyclefont={cycleFont}
+      oncyclewidth={cycleDocWidth}
       onfullscreen={toggleFullscreen}
     />
   </div>
