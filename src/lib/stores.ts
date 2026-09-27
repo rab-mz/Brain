@@ -84,6 +84,41 @@ docWidth.subscribe((w) => {
 
 export const sidebarCollapsed = writable(false)
 
+// Which sidebar groups are expanded ('folder:<name>', 'year:2026',
+// 'month:2026-09'). A store (not Sidebar state) because "new note" also
+// looks at it: with a note open inside an expanded folder, the new note is
+// created in that folder.
+const SIDE_OPEN_KEY = 'brain:side-open'
+
+function initialSideOpen(): string[] {
+  const d = new Date()
+  // The current month is always worth a look.
+  const monthKey = `month:${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SIDE_OPEN_KEY) ?? '[]') as unknown
+    const keys = Array.isArray(parsed) ? (parsed as string[]) : []
+    return keys.includes(monthKey) ? keys : [...keys, monthKey]
+  } catch {
+    return [monthKey]
+  }
+}
+
+export const sideOpen = writable<string[]>(initialSideOpen())
+sideOpen.subscribe((keys) => {
+  try {
+    localStorage.setItem(SIDE_OPEN_KEY, JSON.stringify(keys))
+  } catch {
+    // Ignore: state just won't persist.
+  }
+})
+
+/** Where a new note goes: the folder of the open note while that folder is
+ *  expanded in the sidebar ("as if already inside it"), else notes/. */
+export function newNoteDir(path: string | null, open: string[]): string {
+  const m = path?.match(/^notes\/([^/]+)\/[^/]+\.md$/)
+  return m && open.includes(`folder:${m[1]}`) ? `notes/${m[1]}` : 'notes'
+}
+
 /** notes/ listing with one level of user folders, in the user's manual order. */
 export const noteTree = writable<NoteTree>({ files: [], folders: [] })
 /** File names (not paths) inside journal/. */

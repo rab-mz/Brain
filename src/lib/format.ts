@@ -78,15 +78,18 @@ function runsOf(s: string): number {
 
 // ---------- Rendering (todo items show styled text while not editing) ----------
 
-const INLINE_RENDER_RE = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|~~[^~]+~~)/g
+const INLINE_RENDER_RE = /(`[^`]+`|\[\[[^\]\n]+\]\]|\*\*[^*]+\*\*|\*[^*]+\*|~~[^~]+~~)/g
 
-const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 /**
  * Render one raw markdown line as HTML: **bold**, *italic*, `code`,
- * ~~strike~~ (single level, matching what the toggles produce). Every
- * span carries data-r = the raw offset of its first character, so a click
- * on the rendered text maps back to a caret position in the raw string.
+ * ~~strike~~ (single level, matching what the toggles produce) and
+ * [[wiki-links]] (same `.cm-wikilink` look as in notes; data-wiki holds the
+ * target, the host decides what a click does). Every span carries data-r =
+ * the raw offset of its first character, so a click on the rendered text
+ * maps back to a caret position in the raw string.
  */
 export function renderInlineMarkdown(text: string): string {
   let html = ''
@@ -98,6 +101,12 @@ export function renderInlineMarkdown(text: string): string {
       html += `<span data-r="${last}">${escapeHtml(text.slice(last, m.index))}</span>`
     }
     const token = m[0]
+    if (token.startsWith('[[')) {
+      const name = token.slice(2, -2)
+      html += `<span class="cm-wikilink" data-wiki="${escapeHtml(name.trim())}" data-r="${m.index + 2}">${escapeHtml(name)}</span>`
+      last = m.index + token.length
+      continue
+    }
     const len = token.startsWith('**') || token.startsWith('~~') ? 2 : 1
     const cls = token.startsWith('**') ? 'tr-b' : token.startsWith('~~') ? 'tr-s' : token.startsWith('`') ? 'tr-c' : 'tr-i'
     html += `<span class="${cls}" data-r="${m.index + len}">${escapeHtml(token.slice(len, token.length - len))}</span>`

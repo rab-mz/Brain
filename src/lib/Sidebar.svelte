@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { noteTree, journalFiles, fileTitles, currentPath, sidebarCollapsed } from './stores'
+  import { noteTree, journalFiles, fileTitles, currentPath, sidebarCollapsed, sideOpen, newNoteDir } from './stores'
   import { t, lang, formatDayList, formatDayShort, formatMonth, type Lang } from './i18n'
   import { focusOnMount } from './actions'
   import { autoFolderColor, type FolderColors } from './fs/sidebar-order'
@@ -20,7 +20,8 @@
     /** Manual folder colors; folders not listed get an automatic hue. */
     colors?: FolderColors
     onopen: (path: string) => void
-    oncreate: (title: string) => void
+    /** dir: 'notes' or 'notes/<folder>'. */
+    oncreate: (title: string, dir: string) => void
     oncreatefolder: (name: string) => void
     /** Move/reorder: beforeName === null appends at the end of targetDir. */
     onmovenote: (path: string, targetDir: string, beforeName: string | null) => void
@@ -72,40 +73,24 @@
   }
 
   const today = todayString()
-  const currentMonth = today.slice(0, 7)
   const currentYear = today.slice(0, 4)
 
-  // ---------- Collapsible state (persisted per browser) ----------
-
-  const OPEN_KEY = 'brain:side-open'
-
-  function loadOpen(): string[] {
-    try {
-      const raw = localStorage.getItem(OPEN_KEY)
-      const parsed = raw ? (JSON.parse(raw) as string[]) : []
-      const keys = Array.isArray(parsed) ? parsed : []
-      // The current month is always worth a look.
-      const monthKey = `month:${currentMonth}`
-      return keys.includes(monthKey) ? keys : [...keys, monthKey]
-    } catch {
-      return [`month:${currentMonth}`]
-    }
-  }
-
-  let openKeys = $state<string[]>(loadOpen())
+  // ---------- Collapsible state (persisted per browser, see sideOpen) ----------
 
   function isOpen(key: string): boolean {
-    return openKeys.includes(key)
+    return $sideOpen.includes(key)
   }
 
   function toggleOpen(key: string) {
-    openKeys = isOpen(key) ? openKeys.filter((k) => k !== key) : [...openKeys, key]
-    try {
-      localStorage.setItem(OPEN_KEY, JSON.stringify(openKeys))
-    } catch {
-      // Ignore: state just won't persist.
-    }
+    sideOpen.update((keys) => (keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key]))
   }
+
+  // "+" follows the open note into its folder while that folder is expanded;
+  // the tooltip says where the note will land.
+  const newDir = $derived(newNoteDir($currentPath, $sideOpen))
+  const newNoteTip = $derived(
+    newDir === 'notes' ? $t('sidebar.newNote') : $t('sidebar.newNoteIn').replace('{name}', newDir.slice('notes/'.length))
+  )
 
   // ---------- Journal grouped by year -> month -> day ----------
 
@@ -309,7 +294,7 @@
           <button class="icon-btn" data-tip={$t('sidebar.newFolder')} onclick={() => (newFolderOpen = true)}>
             <FolderIcon plus />
           </button>
-          <button class="icon-btn" data-tip={$t('sidebar.newNote')} onclick={() => oncreate('')}>+</button>
+          <button class="icon-btn" data-tip={newNoteTip} onclick={() => oncreate('', newDir)}>+</button>
         </span>
       </div>
       {#if newFolderOpen}

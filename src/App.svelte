@@ -43,6 +43,8 @@
     theme,
     font,
     docWidth,
+    sideOpen,
+    newNoteDir,
     THEMES,
     FONTS,
     DOC_WIDTHS
@@ -267,19 +269,21 @@
     )
   }
 
-  async function createNote(title: string) {
+  /** dir: 'notes' or a notes/ subfolder ('notes/Entaksi'). */
+  async function createNote(title: string, dir = 'notes') {
     const r = root!
     const slug = slugify(title)
     let name = `${slug}.md`
     let n = 2
-    while (await fileExists(r, `notes/${name}`)) {
+    while (await fileExists(r, `${dir}/${name}`)) {
       name = `${slug}-${n++}.md`
     }
+    const path = `${dir}/${name}`
     const iso = new Date().toISOString()
-    await writeFile(r, `notes/${name}`, `---\ntitle: ${title}\ntype: note\ncreated: ${iso}\nupdated: ${iso}\n---\n`)
-    fileTitles.update((titles) => ({ ...titles, [`notes/${name}`]: title }))
+    await writeFile(r, path, `---\ntitle: ${title}\ntype: note\ncreated: ${iso}\nupdated: ${iso}\n---\n`)
+    fileTitles.update((titles) => ({ ...titles, [path]: title }))
     await refreshNoteTree()
-    await openPath(`notes/${name}`)
+    await openPath(path)
   }
 
   async function createNoteFolder(name: string) {
@@ -563,7 +567,7 @@
     // Chrome reserves Ctrl/Cmd+N for new windows, so Alt+N is the fallback.
     if ((mod || e.altKey) && e.code === 'KeyN') {
       e.preventDefault()
-      void createNote('')
+      void createNote('', newNoteDir(get(currentPath), get(sideOpen)))
       return
     }
     if (mod && e.code === 'KeyJ') {

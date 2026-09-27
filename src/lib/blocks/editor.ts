@@ -769,7 +769,8 @@ class TableWidget extends WidgetType {
   constructor(
     readonly src: string,
     readonly from: number,
-    readonly table: ParsedTable
+    readonly table: ParsedTable,
+    readonly onNavigate: (name: string) => void
   ) {
     super()
   }
@@ -809,8 +810,18 @@ class TableWidget extends WidgetType {
 
     // A click puts the caret in the raw markdown exactly where it landed:
     // the widget disappears and the pipes come back, ready to edit.
+    // A [[wiki-link]] in a cell navigates instead (on click, like in notes).
+    const wikiAt = (e: MouseEvent) => (e.target as HTMLElement).closest<HTMLElement>('.cm-wikilink[data-wiki]')
+    el.addEventListener('click', (e) => {
+      const link = wikiAt(e)
+      if (link) this.onNavigate(link.dataset.wiki!)
+    })
     el.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return
+      if (wikiAt(e)) {
+        e.preventDefault()
+        return
+      }
       const cell = (e.target as HTMLElement).closest<HTMLElement>('[data-base]')
       if (!cell) return
       e.preventDefault()
@@ -896,7 +907,7 @@ function tableWidthPlugin(): Extension {
  * `---` rules, the raw markdown comes back while the selection is inside
  * it, so the table stays editable as plain text in place.
  */
-function tableExtension(): Extension {
+function tableExtension(onNavigate: (name: string) => void): Extension {
   const build = (state: EditorState, focused: boolean): DecorationSet => {
     const builder = new RangeSetBuilder<Decoration>()
     const sel = state.selection.ranges
@@ -913,7 +924,7 @@ function tableExtension(): Extension {
         builder.add(
           first.from,
           last.to,
-          Decoration.replace({ widget: new TableWidget(src, first.from, table), block: true })
+          Decoration.replace({ widget: new TableWidget(src, first.from, table, onNavigate), block: true })
         )
       }
     })
@@ -1150,7 +1161,7 @@ export async function createNoteEditor(
         syntaxHighlighting(markdownHighlight),
         headingSpacingPlugin(),
         hrPlugin(),
-        tableExtension(),
+        tableExtension(opts.onNavigate),
         tableWidthPlugin(),
         wikiLinkPlugin(opts.onNavigate),
         imagePlugin(opts.resolveImage),

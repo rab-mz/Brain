@@ -475,7 +475,13 @@
       {#each doc.blocks as block, i (idOf(block))}
         <div class="block" class:block-special={block.type !== 'note'} data-bid={idOf(block)}>
           {#if block.type === 'todo'}
-            <TodoBlock {block} autostart={block === freshTodo} onedit={scheduleSave} onremove={() => removeBlock(block)} />
+            <TodoBlock
+              {block}
+              autostart={block === freshTodo}
+              onedit={scheduleSave}
+              onremove={() => removeBlock(block)}
+              {onnavigate}
+            />
           {:else if block.type === 'code'}
             <CodeBlock {block} onedit={scheduleSave} />
           {:else}
