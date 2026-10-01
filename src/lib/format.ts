@@ -78,7 +78,7 @@ function runsOf(s: string): number {
 
 // ---------- Rendering (todo items show styled text while not editing) ----------
 
-const INLINE_RENDER_RE = /(`[^`]+`|\[\[[^\]\n]+\]\]|\*\*[^*]+\*\*|\*[^*]+\*|~~[^~]+~~)/g
+const INLINE_RENDER_RE = /(\\[\\`*_~|[\]]|`[^`]+`|\[\[[^\]\n]+\]\]|\*\*[^*]+\*\*|\*[^*]+\*|~~[^~]+~~)/g
 
 const escapeHtml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -101,6 +101,13 @@ export function renderInlineMarkdown(text: string): string {
       html += `<span data-r="${last}">${escapeHtml(text.slice(last, m.index))}</span>`
     }
     const token = m[0]
+    // Backslash escape (`\|` in table cells, `\*` in prose): the
+    // character alone, its span pointing past the backslash.
+    if (token.length === 2 && token[0] === '\\') {
+      html += `<span data-r="${m.index + 1}">${escapeHtml(token[1])}</span>`
+      last = m.index + 2
+      continue
+    }
     if (token.startsWith('[[')) {
       const name = token.slice(2, -2)
       html += `<span class="cm-wikilink" data-wiki="${escapeHtml(name.trim())}" data-r="${m.index + 2}">${escapeHtml(name)}</span>`

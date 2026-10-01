@@ -780,12 +780,8 @@ textarea {
   height: 20px;
 }
 
-.cm-file-pdf .cm-file-icon {
-  color: #e5484d;
-}
-
-.cm-file-csv .cm-file-icon {
-  color: #30a46c;
+.cm-file-icon {
+  color: var(--file-color, var(--muted));
 }
 
 .cm-file-name {
@@ -804,14 +800,16 @@ textarea {
   border-radius: 4px;
 }
 
-.cm-file-pdf .cm-file-ext {
-  color: #e5484d;
-  background: color-mix(in srgb, #e5484d 14%, transparent);
+.cm-file-ext {
+  color: var(--file-color, var(--muted));
+  background: color-mix(in srgb, var(--file-color, var(--muted)) 14%, transparent);
 }
 
-.cm-file-csv .cm-file-ext {
-  color: #30a46c;
-  background: color-mix(in srgb, #30a46c 14%, transparent);
+/* Audio uses the video widget's rules; the player is a bar, not a box. */
+.cm-audio-widget audio {
+  display: block;
+  width: min(100%, 420px);
+  margin: 6px 0;
 }
 
 .cm-file-widget.cm-file-missing {
@@ -1001,22 +999,6 @@ textarea {
   color: var(--drop-color);
 }
 
-.drop-image {
-  --drop-color: #3b82f6;
-}
-
-.drop-video {
-  --drop-color: #8b5cf6;
-}
-
-.drop-pdf {
-  --drop-color: #e5484d;
-}
-
-.drop-csv {
-  --drop-color: #30a46c;
-}
-
 .drop-generic {
   --drop-color: var(--muted);
   color: var(--fg);
@@ -1127,6 +1109,44 @@ textarea {
 
 .todo-render .todo-ph {
   color: var(--muted);
+}
+
+/* Items added today carry a small tag; hovering any stamped item shows when
+   it was added / checked (instant, like the other tooltips — no title). */
+.todo-item {
+  position: relative;
+}
+
+.todo-new {
+  flex-shrink: 0;
+  margin-top: 4px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 0.72em;
+  line-height: 1.6;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.todo-stamp {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% - 2px);
+  z-index: 5;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.72em;
+  white-space: nowrap;
+  color: var(--muted);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+
+.todo-item:hover .todo-stamp {
+  opacity: 1;
 }
 
 /* A run of completed items folded into one row; the chevron sits in the

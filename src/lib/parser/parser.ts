@@ -5,6 +5,15 @@
 export interface TodoItem {
   done: boolean
   text: string
+  /** Blank line(s) above this item in the file. Items separated only by
+   *  blank lines are still one list (one "N completed" group); the flag
+   *  keeps the file's spacing intact on save. */
+  gap?: boolean
+  /** Local "YYYY-MM-DD HH:MM" the item was created / checked, stored in a
+   *  trailing `<!-- brain created="…" done="…" -->` comment (invisible in
+   *  any markdown renderer, still plain text for whoever reads the file). */
+  created?: string
+  doneAt?: string
 }
 
 export type Block =
@@ -25,6 +34,30 @@ const FENCE_RE = /^(`{3,})([^`\s]*)\s*$/
 //   <!-- brain label="Top users query" pinned -->
 const BRAIN_RE = /^<!--\s*brain\b(.*?)-->\s*$/
 const LABEL_RE = /label="((?:[^"\\]|\\.)*)"/
+const ITEM_META_RE = /\s*<!--\s*brain\b(.*?)-->\s*$/
+const STAMP_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/
+
+/** Current local time as stored in todo metadata: "2026-10-01 12:48". */
+export function stampNow(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
+function parseItem(mark: string, raw: string | undefined): TodoItem {
+  const item: TodoItem = { done: mark !== ' ', text: raw ?? '' }
+  const meta = item.text.match(ITEM_META_RE)
+  if (meta) {
+    const created = meta[1].match(/created="([^"]*)"/)?.[1]
+    const done = meta[1].match(/done="([^"]*)"/)?.[1]
+    // Only well-formed stamps are ours; anything else stays in the text.
+    if ((created && STAMP_RE.test(created)) || (done && STAMP_RE.test(done))) {
+      item.text = item.text.slice(0, meta.index)
+      if (created && STAMP_RE.test(created)) item.created = created
+      if (done && STAMP_RE.test(done)) item.doneAt = done
+    }
+  }
+  return item
+}
 
 export function parseDocument(content: string): BrainDoc {
   const lines = content.replace(/\r\n/g, '\n').split('\n')
@@ -93,7 +126,7 @@ function parseBlocks(lines: string[], start: number): Block[] {
         const l = lines[i]
         const m = l.match(TODO_RE)
         if (m) {
-          items.push({ done: m[1] !== ' ', text: m[2] ?? '' })
+          items.push(parseItem(m[1], m[2]))
           i++
           continue
         }
@@ -105,7 +138,7 @@ function parseBlocks(lines: string[], start: number): Block[] {
           const trimmed = l.trim()
           const nested = trimmed.match(TODO_RE)
           if (nested) {
-            items.push({ done: nested[1] !== ' ', text: nested[2] ?? '' })
+            items.push(parseItem(nested[1], nested[2]))
           } else {
             const last = items[items.length - 1]
             last.text = last.text === '' ? trimmed : last.text + ' ' + trimmed
@@ -114,13 +147,23 @@ function parseBlocks(lines: string[], start: number): Block[] {
           continue
         }
         // Blank line(s) followed by an indented continuation still belong
-        // to the item (a common hand-written shape); blanks before
-        // anything else end the block.
+        // to the item (a common hand-written shape); blank lines between
+        // two items keep the list going (remembered as a gap, so the file
+        // keeps its spacing); blanks before anything else end the block.
         if (l.trim() === '') {
           let j = i
           while (j < lines.length && lines[j].trim() === '') j++
           if (j < lines.length && /^[ \t]+\S/.test(lines[j])) {
             i = j
+            continue
+          }
+          if (j < lines.length && TODO_RE.test(lines[j])) {
+            i = j
+            const next = lines[i].match(TODO_RE)!
+            const item = parseItem(next[1], next[2])
+            item.gap = true
+            items.push(item)
+            i++
             continue
           }
         }
@@ -164,7 +207,17 @@ export function serializeDocument(doc: BrainDoc): string {
 export function serializeBlock(block: Block): string {
   if (block.type === 'todo') {
     return block.items
-      .map((it) => `- [${it.done ? 'x' : ' '}]${it.text ? ' ' + it.text : ''}`)
+      .map((it, i) => {
+        let meta = ''
+        if (it.created || it.doneAt) {
+          meta = '<!-- brain'
+          if (it.created) meta += ` created="${it.created}"`
+          if (it.doneAt) meta += ` done="${it.doneAt}"`
+          meta += ' -->'
+        }
+        const body = [it.text, meta].filter(Boolean).join(' ')
+        return `${i > 0 && it.gap ? '\n' : ''}- [${it.done ? 'x' : ' '}]${body ? ' ' + body : ''}`
+      })
       .join('\n')
   }
 

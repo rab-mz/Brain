@@ -14,4 +14,8 @@ describe('renderInlineMarkdown', () => {
     expect(html).not.toContain('cm-wikilink')
     expect(html).toContain('<span class="tr-c" data-r="5">[[x]]</span>')
   })
+
+  it('renders backslash escapes as the bare character', () => {
+    expect(renderInlineMarkdown('a \\| b')).toBe('<span data-r="0">a </span><span data-r="3">|</span><span data-r="4"> b</span>')
+  })
 })

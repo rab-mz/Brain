@@ -21,7 +21,8 @@
     "@codemirror/state": "^6.4.1",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.28.0",
-    "@lezer/highlight": "^1.2.0"
+    "@lezer/highlight": "^1.2.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

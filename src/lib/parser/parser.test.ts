@@ -130,11 +130,12 @@ describe('parseDocument', () => {
         {
           done: false,
           text: "Come funziona in pratica la **delega** all'intermediario sul portale Fatture e Corrispettivi: cosa firma l'esercente, con che credenziali, cosa può fare il delegato, come si revoca"
-        }
+        },
+        // A blank line between two items no longer splits the list.
+        { done: false, text: 'item successivo', gap: true }
       ]
     })
-    expect(doc.blocks[1]).toEqual({ type: 'todo', items: [{ done: false, text: 'item successivo' }] })
-    expect(doc.blocks[2]).toEqual({ type: 'note', text: 'Paragrafo normale dopo la lista.' })
+    expect(doc.blocks[1]).toEqual({ type: 'note', text: 'Paragrafo normale dopo la lista.' })
   })
 
   it('flattens indented nested todos into the same list', () => {
@@ -244,5 +245,44 @@ describe('round-trip: parse(serialize(doc)) === doc', () => {
     expect(twice).toEqual(once)
     // And serialization is a fixed point after one pass.
     expect(serializeDocument(twice)).toBe(serializeDocument(once))
+  })
+
+  it('keeps todos separated only by blank lines in one list, spacing intact', () => {
+    const md = '- [x] a\n- [ ] b\n\n- [x] c\n\n\n- [ ] d\n\nprose\n\n- [ ] e\n'
+    const doc = parseDocument(md)
+    expect(doc.blocks).toEqual([
+      {
+        type: 'todo',
+        items: [
+          { done: true, text: 'a' },
+          { done: false, text: 'b' },
+          { done: true, text: 'c', gap: true },
+          { done: false, text: 'd', gap: true }
+        ]
+      },
+      { type: 'note', text: 'prose' },
+      { type: 'todo', items: [{ done: false, text: 'e' }] }
+    ])
+    // Multiple blank lines collapse to one; otherwise the file is unchanged.
+    expect(serializeDocument(doc)).toBe('- [x] a\n- [ ] b\n\n- [x] c\n\n- [ ] d\n\nprose\n\n- [ ] e\n')
+    roundTrip(doc)
+  })
+
+  it('reads and writes todo creation/check stamps in a trailing comment', () => {
+    const md =
+      '- [x] ship **it** <!-- brain created="2026-10-01 12:48" done="2026-10-02 09:05" -->\n' +
+      '- [ ] <!-- brain created="2026-10-01 13:00" -->\n' +
+      '- [ ] keep <!-- brain whatever -->\n'
+    const doc = parseDocument(md)
+    expect(doc.blocks[0]).toEqual({
+      type: 'todo',
+      items: [
+        { done: true, text: 'ship **it**', created: '2026-10-01 12:48', doneAt: '2026-10-02 09:05' },
+        { done: false, text: '', created: '2026-10-01 13:00' },
+        { done: false, text: 'keep <!-- brain whatever -->' }
+      ]
+    })
+    expect(serializeDocument(doc)).toBe(md)
+    roundTrip(doc)
   })
 })

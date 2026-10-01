@@ -38,6 +38,19 @@ import { showToast } from '../stores'
 import { showMenu } from '../menu'
 import { FORMATS, renderInlineMarkdown } from '../format'
 import {
+  AUDIO_SRC_RE,
+  FILE_SRC_RE,
+  KIND_COLORS,
+  KIND_ICONS,
+  OPENS_AS_TEXT,
+  VIDEO_SRC_RE,
+  extOf,
+  fileKindOf,
+  isMediaFile,
+  mimeOf,
+  type FileKind
+} from '../filetypes'
+import {
   deleteColumn,
   deleteRow,
   emptyTable,
@@ -183,12 +196,9 @@ export type ImageResolver = (src: string) => Promise<string | null>
 
 const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
 
-// Video and document files reuse the ![alt](src) image syntax — the
-// extension decides which widget renders, so the markdown stays readable
-// outside the app.
-const VIDEO_SRC_RE = /\.(mp4|mov|m4v|webm)$/i
-const FILE_SRC_RE = /\.(pdf|csv)$/i
-const FILE_MIME: Record<'pdf' | 'csv', string> = { pdf: 'application/pdf', csv: 'text/csv' }
+// Video, audio and document files reuse the ![alt](src) image syntax — the
+// extension decides which widget renders (table in ../filetypes), so the
+// markdown stays readable outside the app.
 
 // Marks a drag that started from one of our own file cards, so the in-app
 // drop handlers (below and in DocView) can tell it apart from a real file
@@ -196,18 +206,7 @@ const FILE_MIME: Record<'pdf' | 'csv', string> = { pdf: 'application/pdf', csv: 
 // importing it from here would pull CodeMirror into the initial bundle.
 const BRAIN_FILE_DRAG = 'application/x-brain-file'
 
-/** Media (image, video, pdf, csv) accepted by paste/drop. Some drags arrive
- *  with an empty MIME type, so the filename extension is the fallback. */
-export function isMediaFile(file: File): boolean {
-  return (
-    file.type.startsWith('image/') ||
-    file.type.startsWith('video/') ||
-    file.type === 'application/pdf' ||
-    file.type === 'text/csv' ||
-    VIDEO_SRC_RE.test(file.name) ||
-    FILE_SRC_RE.test(file.name)
-  )
-}
+export { isMediaFile }
 
 // Chrome's native "Copy image" re-fetches the src internally and silently
 // fails on blob: URLs inside contenteditable, so the widget shows its own
@@ -263,22 +262,27 @@ function downloadFile(src: string, markdownSrc: string): void {
   a.click()
 }
 
-/** Open the file in a new tab. CSVs are re-wrapped as text/plain first:
- *  a text/csv blob URL triggers a download instead of rendering. */
-async function openFileInTab(url: string, kind: 'pdf' | 'csv'): Promise<void> {
+/** Open the file in a new tab where the browser can show it: PDFs as they
+ *  are, text-ish files re-wrapped as text/plain (a text/csv blob URL would
+ *  download instead of rendering). Office files and archives can't be shown
+ *  by a browser, so "open" for them is a download. */
+async function openFileInTab(url: string, kind: FileKind, src: string): Promise<void> {
   if (kind === 'pdf') {
     window.open(url, '_blank')
     return
   }
+  if (!OPENS_AS_TEXT.has(kind)) {
+    downloadFile(url, src)
+    return
+  }
   const blob = await (await fetch(url)).blob()
-  window.open(URL.createObjectURL(new Blob([blob], { type: 'text/plain' })), '_blank')
+  window.open(URL.createObjectURL(new Blob([blob], { type: 'text/plain;charset=utf-8' })), '_blank')
 }
 
 /** Copy the raw file to the clipboard. Browsers accept only a short list of
  *  MIME types there, so a refused kind gets a toast pointing at drag&drop,
  *  which does carry the real file into Finder and other apps. */
-async function copyFileToClipboard(url: string, kind: 'pdf' | 'csv'): Promise<void> {
-  const type = FILE_MIME[kind]
+async function copyFileToClipboard(url: string, type: string): Promise<void> {
   const supports = (ClipboardItem as { supports?: (t: string) => boolean }).supports
   try {
     if (supports && !supports(type)) throw new Error('unsupported')
@@ -287,6 +291,30 @@ async function copyFileToClipboard(url: string, kind: 'pdf' | 'csv'): Promise<vo
     showToast(get(t)('toast.copied'))
   } catch {
     showToast(get(t)('toast.fileCopyDrag'))
+  }
+}
+
+/** Spreadsheet/CSV card → the same markdown table the editor renders,
+ *  inserted on the lines right below the card (undoable). */
+async function insertSheetAsTable(view: EditorView, dom: HTMLElement, url: string, kind: FileKind): Promise<void> {
+  try {
+    const res = await fetch(url)
+    const { sheetToMarkdown, MAX_ROWS } = await import('../sheet')
+    const tables = await sheetToMarkdown(kind === 'csv' ? await res.text() : await res.arrayBuffer())
+    if (!tables) {
+      showToast(get(t)('table.sheetEmpty'))
+      return
+    }
+    const doc = view.state.doc
+    const line = doc.lineAt(view.posAtDOM(dom))
+    // A text line right below would read as one more table row: keep a
+    // blank line between them.
+    const next = line.number < doc.lines ? doc.line(line.number + 1).text : ''
+    const insert = '\n\n' + tables.markdown + (next.trim() !== '' ? '\n' : '')
+    view.dispatch({ changes: { from: line.to, insert }, scrollIntoView: true })
+    if (tables.truncated) showToast(get(t)('table.sheetTruncated').replace('{n}', String(MAX_ROWS)))
+  } catch {
+    showToast(get(t)('table.sheetFail'))
   }
 }
 
@@ -372,24 +400,27 @@ class ImageWidget extends WidgetType {
   }
 }
 
+/** Inline player: video, or audio (voice memos, recordings) with the same
+ *  rules — the player owns its events, right-click downloads/removes. */
 class VideoWidget extends WidgetType {
   constructor(
     readonly src: string,
     readonly alt: string,
-    readonly resolve: ImageResolver
+    readonly resolve: ImageResolver,
+    readonly audio = false
   ) {
     super()
   }
 
   eq(other: VideoWidget): boolean {
-    return other.src === this.src && other.alt === this.alt
+    return other.src === this.src && other.alt === this.alt && other.audio === this.audio
   }
 
   toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('span')
-    wrap.className = 'cm-video-widget'
+    wrap.className = this.audio ? 'cm-video-widget cm-audio-widget' : 'cm-video-widget'
     addMarkdownCaption(wrap, this.alt, this.src)
-    const video = document.createElement('video')
+    const video = document.createElement(this.audio ? 'audio' : 'video')
     video.controls = true
     video.preload = 'metadata'
     video.onloadedmetadata = () => view.requestMeasure()
@@ -406,7 +437,7 @@ class VideoWidget extends WidgetType {
       e.preventDefault()
       e.stopPropagation()
       showMediaMenu(e.clientX, e.clientY, [
-        { label: get(t)('video.download'), run: () => downloadFile(video.src, this.src) },
+        { label: get(t)(this.audio ? 'audio.download' : 'video.download'), run: () => downloadFile(video.src, this.src) },
         { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) }
       ])
     })
@@ -421,17 +452,11 @@ class VideoWidget extends WidgetType {
   }
 }
 
-// Monochrome SVG icons (no emoji): document sheet for PDF, grid for CSV.
-const FILE_ICONS: Record<'pdf' | 'csv', string> = {
-  pdf: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/><path d="M8.5 13h7M8.5 16.5h7"/></svg>',
-  csv: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="1.5"/><path d="M4 10h16M4 14.5h16M9.5 5v14M14.75 10v9"/></svg>'
-}
-
 class FileWidget extends WidgetType {
   constructor(
     readonly src: string,
     readonly alt: string,
-    readonly kind: 'pdf' | 'csv',
+    readonly kind: FileKind,
     readonly resolve: ImageResolver
   ) {
     super()
@@ -444,23 +469,25 @@ class FileWidget extends WidgetType {
   toDOM(view: EditorView): HTMLElement {
     const wrap = document.createElement('span')
     wrap.className = `cm-file-widget cm-file-${this.kind}`
+    wrap.style.setProperty('--file-color', KIND_COLORS[this.kind])
     // No markdown caption here: the card already shows the file name, and
     // hovering a full path over it is just noise (Baha's call).
     const icon = document.createElement('span')
     icon.className = 'cm-file-icon'
-    icon.innerHTML = FILE_ICONS[this.kind]
+    icon.innerHTML = KIND_ICONS[this.kind]
     const name = document.createElement('span')
     name.className = 'cm-file-name'
     name.textContent = this.alt || decodeURI(this.src).split('/').pop() || this.src
     const ext = document.createElement('span')
     ext.className = 'cm-file-ext'
-    ext.textContent = this.kind.toUpperCase()
+    ext.textContent = extOf(this.src).toUpperCase()
     wrap.append(icon, name, ext)
 
     // The blob URL arrives async; actions before it resolves are no-ops.
     let url: string | null = null
     let fileData: File | null = null
-    const fileName = decodeURI(this.src).split('/').pop() || `file.${this.kind}`
+    const fileName = decodeURI(this.src).split('/').pop() || `file.${extOf(this.src)}`
+    const mime = mimeOf(this.src)
     void this.resolve(this.src).then(async (u) => {
       if (!u) {
         wrap.classList.add('cm-file-missing')
@@ -469,16 +496,21 @@ class FileWidget extends WidgetType {
       url = u
       // Prefetched: dragstart is synchronous and needs the File ready.
       const blob = await (await fetch(u)).blob()
-      fileData = new File([blob], fileName, { type: FILE_MIME[this.kind] })
+      fileData = new File([blob], fileName, { type: mime })
     })
 
     wrap.addEventListener('contextmenu', (e) => {
       e.preventDefault()
       e.stopPropagation()
       const items = [
-        { label: get(t)('file.open'), run: () => url && void openFileInTab(url, this.kind) },
-        { label: get(t)('file.copy'), run: () => url && void copyFileToClipboard(url, this.kind) },
-        ...(this.kind === 'csv' ? [{ label: get(t)('csv.copy'), run: () => url && copyCsvText(url) }] : []),
+        ...(this.kind === 'pdf' || OPENS_AS_TEXT.has(this.kind)
+          ? [{ label: get(t)('file.open'), run: () => url && void openFileInTab(url, this.kind, this.src) }]
+          : []),
+        ...(this.kind === 'sheet' || this.kind === 'csv'
+          ? [{ label: get(t)('table.fromSheet'), run: () => url && void insertSheetAsTable(view, wrap, url, this.kind) }]
+          : []),
+        { label: get(t)('file.copy'), run: () => url && void copyFileToClipboard(url, mime) },
+        ...(OPENS_AS_TEXT.has(this.kind) ? [{ label: get(t)('csv.copy'), run: () => url && copyCsvText(url) }] : []),
         { label: get(t)('file.download'), run: () => url && downloadFile(url, this.src) },
         { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) }
       ]
@@ -487,7 +519,7 @@ class FileWidget extends WidgetType {
     // Double click = quick open, mirroring the images' quick copy.
     wrap.addEventListener('dblclick', (e) => {
       e.preventDefault()
-      if (url) void openFileInTab(url, this.kind)
+      if (url) void openFileInTab(url, this.kind, this.src)
     })
     // The card drags straight out of the app: Finder/desktop receive the
     // real file via Chrome's DownloadURL, web targets (mail, chats) via the
@@ -501,7 +533,7 @@ class FileWidget extends WidgetType {
       if (!e.dataTransfer || !url) return
       e.dataTransfer.effectAllowed = 'copy'
       e.dataTransfer.setData(BRAIN_FILE_DRAG, this.src)
-      e.dataTransfer.setData('DownloadURL', `${FILE_MIME[this.kind]}:${fileName}:${url}`)
+      e.dataTransfer.setData('DownloadURL', `${mime}:${fileName}:${url}`)
       if (fileData) e.dataTransfer.items.add(fileData)
     })
     return wrap
@@ -537,12 +569,14 @@ function imagePlugin(resolve: ImageResolver): Extension {
           const from = line.from + m.index
           const to = from + m[0].length
           if (!selectionInside(from, to)) {
-            const fileExt = FILE_SRC_RE.exec(m[2])
+            const fileKind = FILE_SRC_RE.test(m[2]) ? fileKindOf(m[2]) : null
             const widget = VIDEO_SRC_RE.test(m[2])
               ? new VideoWidget(m[2], m[1], resolve)
-              : fileExt
-                ? new FileWidget(m[2], m[1], fileExt[1].toLowerCase() as 'pdf' | 'csv', resolve)
-                : new ImageWidget(m[2], m[1], resolve)
+              : AUDIO_SRC_RE.test(m[2])
+                ? new VideoWidget(m[2], m[1], resolve, true)
+                : fileKind
+                  ? new FileWidget(m[2], m[1], fileKind, resolve)
+                  : new ImageWidget(m[2], m[1], resolve)
             builder.add(from, to, Decoration.replace({ widget }))
           }
         }

@@ -6,7 +6,7 @@
   import { autosize, fit } from '../actions'
   import { showMenu } from '../menu'
   import { FORMATS, toggleMarkerInText, renderInlineMarkdown } from '../format'
-  import type { Block } from '../parser/parser'
+  import { stampNow, type Block, type TodoItem } from '../parser/parser'
 
   let {
     block,
@@ -59,8 +59,10 @@
     return [{ kind: 'done', count: done.length } as Row, ...(showDone ? done : []), ...open]
   })
 
-  function setDone(item: { done: boolean }, done: boolean) {
+  function setDone(item: TodoItem, done: boolean) {
     item.done = done
+    if (done) item.doneAt = stampNow()
+    else delete item.doneAt
     if (done) {
       justDone.add(item)
       setTimeout(() => justDone.delete(item), LINGER_MS)
@@ -70,9 +72,16 @@
     onedit()
   }
 
+  // Moving the edit to another item unmounts the current textarea, and
+  // Chrome fires blur on a focused element as it is removed — which would
+  // reset focusedIdx right after we set it (Enter left the caret nowhere).
+  let switching = false
+
   async function focusItem(i: number, caret?: number) {
+    switching = true
     focusedIdx = i
     await tick()
+    switching = false
     // One item at a time is a textarea, so this always finds the right one.
     const el = listEl.querySelector<HTMLTextAreaElement>('textarea.todo-text')
     if (el) {
@@ -93,6 +102,19 @@
     return r == null ? undefined : Number(r) + range.startOffset
   }
 
+  // Stamps are local "YYYY-MM-DD HH:MM"; the date part says "today".
+  const today = stampNow().slice(0, 10)
+  function stampTip(item: TodoItem): string {
+    const fmt = (s: string) => {
+      const [d, time] = s.split(' ')
+      return (d === today ? $t('todo.today') : d.split('-').reverse().join('/')) + ' ' + time
+    }
+    const parts: string[] = []
+    if (item.created) parts.push($t('todo.created').replace('{when}', fmt(item.created)))
+    if (item.done && item.doneAt) parts.push($t('todo.checked').replace('{when}', fmt(item.doneAt)))
+    return parts.join(', ')
+  }
+
   const wikiAt = (e: MouseEvent) => (e.target as HTMLElement).closest<HTMLElement>('.cm-wikilink[data-wiki]')
 
   function startEdit(e: MouseEvent, i: number) {
@@ -109,6 +131,7 @@
   }
 
   function onBlur(e: FocusEvent) {
+    if (switching) return
     // The formatting menu takes focus while it is open: stay in edit mode.
     if ((e.relatedTarget as HTMLElement | null)?.closest('.cm-image-menu')) return
     focusedIdx = null
@@ -118,16 +141,22 @@
     const el = e.target as HTMLTextAreaElement
     if (e.key === 'Enter') {
       e.preventDefault()
-      block.items.splice(i + 1, 0, { done: false, text: '' })
+      // Enter mid-text splits the item, the tail going to the new one.
+      const cut = el.selectionStart
+      const tail = el.value.slice(el.selectionEnd).trimStart()
+      block.items[i].text = el.value.slice(0, cut)
+      block.items.splice(i + 1, 0, { done: false, text: tail, created: stampNow() })
       onedit()
-      await focusItem(i + 1)
+      await focusItem(i + 1, 0)
     } else if (e.key === 'Escape') {
       el.blur()
     } else if ((e.key === 'Backspace' || e.key === 'Delete') && el.value === '') {
       // Emptied item + one more Backspace/Del = the item goes; the last
       // one takes the whole block with it (there is no other way out).
       e.preventDefault()
-      block.items.splice(i, 1)
+      // The blank line above a removed item stays where it was.
+      const [gone] = block.items.splice(i, 1)
+      if (gone.gap && block.items[i]) block.items[i].gap = true
       if (block.items.length === 0) {
         onremove()
         return
@@ -222,6 +251,12 @@
               <span class="todo-ph">{$t('todo.ph')}</span>
             {/if}
           </div>
+        {/if}
+        {#if item.created?.startsWith(today) && !item.done}
+          <span class="todo-new">{$t('todo.new')}</span>
+        {/if}
+        {#if item.created || (item.done && item.doneAt)}
+          <span class="todo-stamp">{stampTip(item)}</span>
         {/if}
       </div>
     {/if}
