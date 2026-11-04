@@ -50,6 +50,17 @@ export const extOf = (name: string) => (name.match(/\.([^./]+)$/)?.[1] ?? '').to
 export const fileKindOf = (src: string): FileKind | null => EXT_KIND[extOf(src)] ?? null
 export const mimeOf = (src: string) => EXT_MIME[extOf(src)] ?? 'application/octet-stream'
 
+export const IMAGE_SRC_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp|ico|heic)$/i
+
+/** Kind of a file on disk from its name, for the sidebar and MediaView;
+ *  null = unknown (scripts, binaries…), shown as a generic file. */
+export function kindOfName(name: string): DropKind | null {
+  if (IMAGE_SRC_RE.test(name)) return 'image'
+  if (VIDEO_SRC_RE.test(name)) return 'video'
+  if (AUDIO_SRC_RE.test(name)) return 'audio'
+  return fileKindOf(name)
+}
+
 /** Kinds whose content the browser can show in a tab as text. */
 export const OPENS_AS_TEXT: ReadonlySet<FileKind> = new Set(['csv', 'text'])
 

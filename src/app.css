@@ -327,6 +327,175 @@ textarea {
   border-left-color: color-mix(in srgb, var(--fc, var(--accent)) 50%, transparent);
 }
 
+/* Folder names truncate before the count, never push it out. */
+.group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* assets/ holds files, not notes: a quieter row than the note folders. */
+.assets-li > .side-group {
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* Files inside a folder (images, PDFs, videos): icon tinted by kind. */
+.side-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.side-file.active {
+  color: var(--accent);
+}
+
+.file-icon {
+  display: inline-flex;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.file-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* MediaView: one file of a folder, with the notes that use it. */
+.media-view {
+  max-width: var(--doc-max, 720px);
+  margin: 0 auto;
+  padding: 40px 32px 80px;
+}
+
+.media-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.media-title {
+  font-size: 20px;
+  font-weight: 600;
+  word-break: break-all;
+  margin: 0 0 4px;
+}
+
+.media-where {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.media-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.media-btn {
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.media-btn:hover {
+  background: var(--bg3);
+}
+
+.media-btn.danger {
+  color: #e5484d;
+  border-color: color-mix(in srgb, #e5484d 45%, transparent);
+}
+
+.media-btn.danger:hover {
+  background: color-mix(in srgb, #e5484d 12%, transparent);
+}
+
+.media-preview {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--bg2);
+  display: flex;
+  justify-content: center;
+}
+
+.media-preview img,
+.media-preview video {
+  display: block;
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.media-preview audio {
+  width: 100%;
+  margin: 16px;
+}
+
+.media-preview iframe {
+  width: 100%;
+  height: 70vh;
+  border: 0;
+  background: #fff;
+}
+
+.media-none {
+  padding: 40px 16px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.media-refs {
+  margin-top: 22px;
+}
+
+.media-refs h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.media-refs ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.media-refs button {
+  color: var(--accent);
+  text-align: left;
+}
+
+.media-refs button:hover {
+  text-decoration: underline;
+}
+
+.media-refs p {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0;
+}
+
 /* Folder color picker (right-click on a folder row) */
 .color-pop {
   position: fixed;

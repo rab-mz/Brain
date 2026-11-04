@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte'
-  import { listMarkdown, listNotesTree, fileExists } from './fs/files'
+  import { listMarkdown, listNotesTree, fileExists, allNotePaths } from './fs/files'
   import { t } from './i18n'
   import FolderIcon from './FolderIcon.svelte'
 
@@ -29,7 +29,9 @@
     folders = tree.folders.map((f) => f.name)
     out.push({
       folder: 'notes',
-      files: [...tree.files.sort(), ...tree.folders.flatMap((f) => f.files.sort().map((n) => `${f.name}/${n}`))]
+      files: allNotePaths(tree)
+        .map((p) => p.slice('notes/'.length))
+        .sort()
     })
     for (const folder of ['journal', 'ideas']) {
       out.push({ folder, files: (await listMarkdown(root, folder)).sort() })

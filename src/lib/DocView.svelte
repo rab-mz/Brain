@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte'
   import { parseDocument, serializeDocument, stampNow, type BrainDoc, type Block } from './parser/parser'
-  import { readFile, writeFile, readFileBlob, fileExists, normalizePath, ASSETS_DIR } from './fs/files'
+  import { readFile, writeFile, readFileBlob, fileExists, folderExists, normalizePath, relativePath, ASSETS_DIR } from './fs/files'
   import { autosize, fit } from './actions'
   import { t, lang, formatDayFull } from './i18n'
   import TodoBlock from './blocks/TodoBlock.svelte'
@@ -15,7 +15,8 @@
     path,
     onsaved,
     onrequestdelete,
-    onnavigate
+    onnavigate,
+    ondeletefile
   }: {
     root: FileSystemDirectoryHandle
     path: string
@@ -23,6 +24,9 @@
     onrequestdelete: () => void
     /** A [[wiki-link]] in a note was clicked: open that note. */
     onnavigate: (name: string) => void
+    /** "Delete file" on an embed: vault path of the file, plus how to drop
+     *  the embed from this note once the user confirms. */
+    ondeletefile: (path: string, removeText: () => void) => void
   } = $props()
 
   let doc: BrainDoc | null = $state(null)
@@ -170,17 +174,30 @@
     return `${base}.${ext}`
   }
 
-  /** Save a dropped image/video/file next to the document and return its relative link. */
+  /** Where dropped files go: the nearest assets/ already there, walking up
+   *  to the project folder (a note in 'Spicchio POS/prodotto' uses
+   *  'Spicchio POS/assets'), else a new assets/ next to the document. */
+  async function assetsDir(): Promise<string> {
+    const parts = docDir.split('/')
+    for (let i = parts.length; i >= Math.min(2, parts.length); i--) {
+      const dir = `${parts.slice(0, i).join('/')}/${ASSETS_DIR}`
+      if (await folderExists(root, dir)) return dir
+    }
+    return `${docDir}/${ASSETS_DIR}`
+  }
+
+  /** Save a dropped image/video/file in the assets folder and return its relative link. */
   async function saveImage(file: File): Promise<string> {
     const clean = sanitizeImageName(file.name)
     const dot = clean.lastIndexOf('.')
+    const dir = await assetsDir()
     let name = clean
     let n = 2
-    while (await fileExists(root, `${docDir}/${ASSETS_DIR}/${name}`)) {
+    while (await fileExists(root, `${dir}/${name}`)) {
       name = `${clean.slice(0, dot)}-${n++}${clean.slice(dot)}`
     }
-    await writeFile(root, `${docDir}/${ASSETS_DIR}/${name}`, file)
-    return `${ASSETS_DIR}/${name}`
+    await writeFile(root, `${dir}/${name}`, file)
+    return encodeURI(relativePath(docDir, `${dir}/${name}`))
   }
 
   let dragOver = $state(false)
@@ -451,6 +468,7 @@
               {block}
               grow={i === doc.blocks.length - 1}
               resolveimage={resolveImage}
+              deletefile={(src, removeText) => ondeletefile(normalizePath(docDir + '/' + decodeURI(src)), removeText)}
               saveimage={saveImage}
               onedit={scheduleSave}
               onready={onNoteReady}

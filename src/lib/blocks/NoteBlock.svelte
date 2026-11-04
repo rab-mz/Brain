@@ -2,12 +2,13 @@
   import { onDestroy } from 'svelte'
   import type { Block } from '../parser/parser'
   import { hideMarkup } from '../stores'
-  import type { NoteEditor, ImageResolver } from './editor'
+  import type { NoteEditor, ImageResolver, DeleteFile } from './editor'
 
   let {
     block,
     grow = false,
     resolveimage,
+    deletefile,
     saveimage,
     onedit,
     onready,
@@ -18,6 +19,7 @@
     block: Extract<Block, { type: 'note' }>
     grow?: boolean
     resolveimage: ImageResolver
+    deletefile: DeleteFile
     saveimage: (file: File) => Promise<string>
     onedit: () => void
     onready: (block: object, api: NoteEditor) => void
@@ -43,6 +45,7 @@
         text: block.text,
         hideMarkup: $hideMarkup,
         resolveImage: resolveimage,
+        deleteFile: deletefile,
         saveImage: saveimage,
         onChange: (text) => {
           block.text = text

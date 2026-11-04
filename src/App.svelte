@@ -5,6 +5,7 @@
   import DocView from './lib/DocView.svelte'
   import IdeasView from './lib/IdeasView.svelte'
   import FolderView from './lib/FolderView.svelte'
+  import MediaView from './lib/MediaView.svelte'
   import RightBar from './lib/RightBar.svelte'
   import ConfirmDialog from './lib/ConfirmDialog.svelte'
   import Palette from './lib/palette/Palette.svelte'
@@ -13,6 +14,14 @@
     ensureStructure,
     listMarkdown,
     listNotesTree,
+    allNotePaths,
+    findFolder,
+    findReferences,
+    stripReferences,
+    relinkContent,
+    moveFolderTo,
+    isAssetsPath,
+    type FolderNode,
     createFolder,
     renameFolder,
     folderExists,
@@ -45,6 +54,7 @@
     docWidth,
     sideOpen,
     newNoteDir,
+    openFolder,
     THEMES,
     FONTS,
     DOC_WIDTHS
@@ -62,6 +72,9 @@
 
   let root: FileSystemDirectoryHandle | null = $state(null)
   let confirmDelete: { path: string; title: string } | null = $state(null)
+  /** A non-note file to delete from disk; `refs` = notes that embed it,
+   *  `removeText` = drop the embed from the open note (in-note menu). */
+  let confirmFile: { path: string; refs: string[]; removeText?: () => void } | null = $state(null)
   let lastIndexJson = ''
   let sidebarOrder: SidebarOrder = {}
   let folderColors = $state<FolderColors>({})
@@ -126,23 +139,27 @@
     scheduleIndexLoad(r)
   }
 
-  // Key for the folders' own order; ':' keeps it out of the directory keys.
-  const FOLDERS_ORDER_KEY = 'notes:folders'
+  // Order keys: '<dir>' holds the notes' order, '<dir>:folders' the
+  // subfolders' order (':' keeps it out of the directory keys). The root's
+  // folder key stays 'notes:folders' as in older vaults.
+  const foldersKey = (dir: string) => `${dir}:folders`
+
+  /** Apply the user's manual order at every level of the tree. */
+  function ordered(node: FolderNode): FolderNode {
+    const names = applyOrder(
+      node.folders.map((f) => f.name),
+      sidebarOrder[foldersKey(node.path)]
+    )
+    return {
+      ...node,
+      files: applyOrder(node.files, sidebarOrder[node.path]),
+      folders: names.map((name) => ordered(node.folders.find((f) => f.name === name)!))
+    }
+  }
 
   /** Re-list notes/ from disk and apply the user's manual order. */
   async function refreshNoteTree() {
-    const tree = await listNotesTree(root!)
-    const folderNames = applyOrder(
-      tree.folders.map((f) => f.name),
-      sidebarOrder[FOLDERS_ORDER_KEY]
-    )
-    noteTree.set({
-      files: applyOrder(tree.files, sidebarOrder['notes']),
-      folders: folderNames.map((name) => {
-        const f = tree.folders.find((t) => t.name === name)!
-        return { name, files: applyOrder(f.files, sidebarOrder[`notes/${name}`]) }
-      })
-    })
+    noteTree.set(ordered(await listNotesTree(root!)))
   }
 
   function safeGet(key: string): string | null {
@@ -215,15 +232,23 @@
 
   let trail = $state<Array<{ path: string; title: string }>>([])
 
-  /** Where the note behind a [[name]] lives: file name first (any notes/
-   *  folder), then frontmatter title, then journal for date-shaped names. */
+  /** Where the note behind a [[name]] lives: file name first (any folder,
+   *  any depth; with homonyms the one closest to the open note wins, so
+   *  [[note-4]] in Spicchio POS never opens Passo's note-4), then
+   *  frontmatter title, then journal for date-shaped names. */
   function findNoteByName(name: string): string | null {
     const clean = name.trim()
-    const tree = get(noteTree)
     const fname = `${clean}.md`
-    if (tree.files.includes(fname)) return `notes/${fname}`
-    for (const folder of tree.folders) {
-      if (folder.files.includes(fname)) return `notes/${folder.name}/${fname}`
+    const matches = allNotePaths(get(noteTree)).filter((p) => p.split('/').pop() === fname)
+    if (matches.length > 0) {
+      const cur = (get(currentPath) ?? '').split('/').slice(0, -1)
+      const shared = (p: string) => {
+        const dir = p.split('/').slice(0, -1)
+        let i = 0
+        while (i < dir.length && i < cur.length && dir[i] === cur[i]) i++
+        return i
+      }
+      return matches.reduce((best, p) => (shared(p) > shared(best) ? p : best))
     }
     const lower = clean.toLowerCase()
     for (const [path, title] of Object.entries(get(fileTitles))) {
@@ -286,49 +311,85 @@
     await openPath(path)
   }
 
-  async function createNoteFolder(name: string) {
+  /** New folder inside `parentDir` ('notes' or any folder path), shown open. */
+  async function createNoteFolder(name: string, parentDir = 'notes') {
     const clean = name.replace(/[/\\]+/g, '-').trim()
-    if (!clean || clean === 'assets') return
-    await createFolder(root!, `notes/${clean}`)
-    await refreshNoteTree()
-  }
-
-  /** Rename a notes/ subfolder, carrying manual order, titles and index along. */
-  async function renameNoteFolder(oldName: string, newName: string) {
-    const clean = newName.replace(/[/\\]+/g, '-').trim()
-    if (!clean || clean === 'assets' || clean === oldName) return
-    const r = root!
-    if (await folderExists(r, `notes/${clean}`)) {
+    if (!clean || clean.startsWith('.')) return
+    const path = `${parentDir}/${clean}`
+    if (await folderExists(root!, path)) {
       showToast(get(t)('folder.exists'))
       return
     }
-    const folder = get(noteTree).folders.find((f) => f.name === oldName)
-    await renameFolder(r, `notes/${oldName}`, clean)
-    if (sidebarOrder[`notes/${oldName}`]) {
-      sidebarOrder[`notes/${clean}`] = sidebarOrder[`notes/${oldName}`]
-      delete sidebarOrder[`notes/${oldName}`]
+    await createFolder(root!, path)
+    await refreshNoteTree()
+    openFolder(path.slice('notes/'.length))
+  }
+
+  /** A folder went from `oldPath` to `newPath` (rename or move): carry the
+   *  manual order, colors, open state, titles, index and resume target. */
+  async function remapFolder(oldPath: string, newPath: string, notesBefore: string[]) {
+    const swap = (p: string) => (p === oldPath || p.startsWith(oldPath + '/') ? newPath + p.slice(oldPath.length) : p)
+    for (const key of Object.keys(sidebarOrder)) {
+      const [dir, suffix] = key.split(/(?=:folders$)/)
+      const moved = swap(dir) + (suffix ?? '')
+      if (moved !== key) {
+        sidebarOrder[moved] = sidebarOrder[key]
+        delete sidebarOrder[key]
+      }
     }
-    const folderOrder = sidebarOrder[FOLDERS_ORDER_KEY]
-    if (folderOrder) {
-      sidebarOrder[FOLDERS_ORDER_KEY] = folderOrder.map((n) => (n === oldName ? clean : n))
-    }
-    if (folderColors[oldName]) {
-      folderColors[clean] = folderColors[oldName]
-      delete folderColors[oldName]
-      folderColors = { ...folderColors }
-    }
+    const oldRel = oldPath.slice('notes/'.length)
+    const newRel = newPath.slice('notes/'.length)
+    const swapRel = (r: string) => (r === oldRel || r.startsWith(oldRel + '/') ? newRel + r.slice(oldRel.length) : r)
+    const colors: FolderColors = {}
+    for (const [k, v] of Object.entries(folderColors)) colors[swapRel(k)] = v
+    folderColors = colors
+    sideOpen.update((keys) => keys.map((k) => (k.startsWith('folder:') ? 'folder:' + swapRel(k.slice(7)) : k)))
     await savePrefs()
-    for (const file of folder?.files ?? []) {
-      renamePathEverywhere(`notes/${oldName}/${file}`, `notes/${clean}/${file}`)
-    }
-    // The resume target may point into the renamed folder (this page is
-    // open instead of a document, so renamePathEverywhere can't catch it).
+    for (const path of notesBefore) renamePathEverywhere(path, swap(path))
+    const cur = get(currentPath)
+    if (cur && cur !== swap(cur)) currentPath.set(swap(cur))
     const last = safeGet('brain:last-doc')
-    if (last?.startsWith(`notes/${oldName}/`)) {
+    if (last && last !== swap(last)) {
       try {
-        localStorage.setItem('brain:last-doc', `notes/${clean}/` + last.slice(`notes/${oldName}/`.length))
+        localStorage.setItem('brain:last-doc', swap(last))
       } catch {}
     }
+  }
+
+  /** After a folder moved, notes elsewhere that link files inside it by a
+   *  relative path ('![x](sub/assets/a.png)') get the new path. */
+  async function relinkOutside(oldPath: string, newPath: string, allNotes: string[]) {
+    const r = root!
+    const name = oldPath.split('/').pop()!
+    for (const path of allNotes) {
+      if (path.startsWith(oldPath + '/')) continue
+      const content = await readFile(r, path)
+      if (content == null || !(content.includes(name) || content.includes(encodeURI(name)))) continue
+      const dir = path.split('/').slice(0, -1).join('/')
+      const out = relinkContent(content, dir, dir, { from: oldPath, to: newPath })
+      if (out !== content) await writeFile(r, path, out)
+    }
+  }
+
+  /** Rename a folder (path under notes/, any depth) in place. */
+  async function renameNoteFolder(oldRel: string, newName: string) {
+    const clean = newName.replace(/[/\\]+/g, '-').trim()
+    const oldPath = `notes/${oldRel}`
+    const parent = oldPath.split('/').slice(0, -1).join('/')
+    if (!clean || clean.startsWith('.') || clean === oldPath.split('/').pop()) return
+    const r = root!
+    if (await folderExists(r, `${parent}/${clean}`)) {
+      showToast(get(t)('folder.exists'))
+      return
+    }
+    const node = findFolder(get(noteTree), oldPath)
+    const notesBefore = node ? allNotePaths(node) : []
+    const allNotes = allNotePaths(get(noteTree))
+    await renameFolder(r, oldPath, clean)
+    await relinkOutside(oldPath, `${parent}/${clean}`, allNotes)
+    const order = sidebarOrder[foldersKey(parent)]
+    if (order) sidebarOrder[foldersKey(parent)] = order.map((n) => (n === oldPath.split('/').pop() ? clean : n))
+    await remapFolder(oldPath, `${parent}/${clean}`, notesBefore)
     await refreshNoteTree()
     showToast(get(t)('toast.renamed'))
   }
@@ -336,18 +397,17 @@
   // ---------- Sidebar drag & drop: reorder and move between folders ----------
 
   function orderedFilesOf(dir: string): string[] {
-    const tree = get(noteTree)
-    if (dir === 'notes') return [...tree.files]
-    const folder = tree.folders.find((f) => `notes/${f.name}` === dir)
+    const folder = findFolder(get(noteTree), dir)
     return folder ? [...folder.files] : []
   }
 
   async function moveNote(path: string, targetDir: string, beforeName: string | null) {
     const r = root!
+    if (isAssetsPath(targetDir)) return
     const name = path.split('/').pop()!
     const fromDir = path.split('/').slice(0, -1).join('/')
 
-    // Physical move when the note changes folder (images travel along).
+    // Physical move when the note changes folder (links are kept working).
     let finalName = name
     if (fromDir !== targetDir) {
       const stem = name.replace(/\.md$/, '')
@@ -372,16 +432,40 @@
     await refreshNoteTree()
   }
 
-  async function moveFolder(name: string, beforeName: string | null) {
-    const names = get(noteTree)
-      .folders.map((f) => f.name)
-      .filter((n) => n !== name)
+  /**
+   * Drag & drop of a folder (vault path). `targetDir` is the folder it must
+   * end up in; `beforeName` a sibling to insert before (null = at the end).
+   * Same parent = reorder only; another parent = the folder moves on disk.
+   */
+  async function moveFolder(path: string, targetDir: string, beforeName: string | null) {
+    const r = root!
+    const name = path.split('/').pop()!
+    const fromDir = path.split('/').slice(0, -1).join('/')
+    // assets/ never moves: every note of the project points into it.
+    if (targetDir === path || targetDir.startsWith(path + '/') || isAssetsPath(targetDir) || isAssetsPath(path)) return
+    if (fromDir !== targetDir) {
+      if (await folderExists(r, `${targetDir}/${name}`)) {
+        showToast(get(t)('folder.exists'))
+        return
+      }
+      const node = findFolder(get(noteTree), path)
+      const notesBefore = node ? allNotePaths(node) : []
+      const allNotes = allNotePaths(get(noteTree))
+      await moveFolderTo(r, path, `${targetDir}/${name}`)
+      await relinkOutside(path, `${targetDir}/${name}`, allNotes)
+      const fromOrder = sidebarOrder[foldersKey(fromDir)]
+      if (fromOrder) sidebarOrder[foldersKey(fromDir)] = fromOrder.filter((n) => n !== name)
+      await remapFolder(path, `${targetDir}/${name}`, notesBefore)
+    }
+    const target = findFolder(get(noteTree), targetDir)
+    const names = (target?.folders.map((f) => f.name) ?? []).filter((n) => n !== name)
     const at = beforeName ? names.indexOf(beforeName) : -1
     if (at >= 0) names.splice(at, 0, name)
     else names.push(name)
-    sidebarOrder[FOLDERS_ORDER_KEY] = names
+    sidebarOrder[foldersKey(targetDir)] = names
     await savePrefs()
     await refreshNoteTree()
+    if (fromDir !== targetDir) openFolder(`${targetDir}/${name}`.slice('notes/'.length))
   }
 
   /** Keep titles, index and the open document pointing at a renamed path. */
@@ -492,6 +576,59 @@
     await openPath(todayJournalPath())
   }
 
+  // ---------- Files (images, PDFs…) under notes/: view and delete ----------
+
+  /** Anything under notes/ that is not a note opens in MediaView. */
+  function isMediaPath(p: string): boolean {
+    return p.startsWith('notes/') && !p.endsWith('.md')
+  }
+
+  async function requestDeleteFile(path: string, removeText?: () => void) {
+    if (!root) return
+    const refs = await findReferences(root, allNotePaths(get(noteTree)), path)
+    confirmFile = { path, refs, removeText }
+  }
+
+  const fileDeleteMessage = $derived.by(() => {
+    if (!confirmFile) return ''
+    const name = confirmFile.path.split('/').pop()!
+    const head = $t('file.deleteMsg').replace('{name}', name)
+    if (confirmFile.refs.length === 0) return `${head} ${$t('file.noRefs')}`
+    return `${head} ${$t('file.refs').replace('{notes}', confirmFile.refs.map((p) => displayTitle(p)).join(', '))}`
+  })
+
+  async function confirmDeleteFileNow() {
+    if (!confirmFile || !root) return
+    const { path, refs, removeText } = confirmFile
+    confirmFile = null
+    const r = root
+    // The open note drops the embed itself (undoable, saved by DocView);
+    // every other note that used the file is cleaned on disk.
+    removeText?.()
+    const open = get(currentPath)
+    for (const ref of refs) {
+      if (removeText && ref === open) continue
+      const content = await readFile(r, ref)
+      if (content == null) continue
+      const out = stripReferences(content, ref.split('/').slice(0, -1).join('/'), path)
+      if (out !== content) await writeFile(r, ref, out)
+    }
+    // Viewing the file itself: move on to the next one in the same folder
+    // (deleting a batch of old screenshots is one click each), else today.
+    let next: string | null = null
+    if (open === path) {
+      const dir = path.split('/').slice(0, -1).join('/')
+      const media = findFolder(get(noteTree), dir)?.media ?? []
+      const i = media.indexOf(path.split('/').pop()!)
+      const sibling = media[i + 1] ?? media[i - 1]
+      next = sibling ? `${dir}/${sibling}` : todayJournalPath()
+    }
+    await deleteFile(r, path)
+    await refreshNoteTree()
+    showToast(get(t)('toast.deleted'))
+    if (next) await openPath(next)
+  }
+
   // ---------- Right bar actions ----------
 
   let mainEl: HTMLElement | null = $state(null)
@@ -502,7 +639,7 @@
 
   async function downloadTxt() {
     const path = get(currentPath)
-    if (!path || path === 'folder' || !root) return
+    if (!path || path === 'folder' || !root || isMediaPath(path)) return
     const filePath = path === 'ideas' ? 'ideas/ideas.md' : path
     const content = await readFile(root, filePath)
     if (content == null) return
@@ -539,11 +676,14 @@
   async function exportJson() {
     const r = root!
     const files: Array<{ path: string; content: string }> = []
-    for (const folder of ['notes', 'journal', 'ideas']) {
-      for (const name of await listMarkdown(r, folder)) {
-        const content = await readFile(r, `${folder}/${name}`)
-        if (content != null) files.push({ path: `${folder}/${name}`, content })
-      }
+    const paths = [
+      ...allNotePaths(get(noteTree)),
+      ...(await listMarkdown(r, 'journal')).map((n) => `journal/${n}`),
+      ...(await listMarkdown(r, 'ideas')).map((n) => `ideas/${n}`)
+    ]
+    for (const path of paths) {
+      const content = await readFile(r, path)
+      if (content != null) files.push({ path, content })
     }
     const payload = { app: 'brain', exportedAt: new Date().toISOString(), files }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
@@ -567,7 +707,7 @@
     // Chrome reserves Ctrl/Cmd+N for new windows, so Alt+N is the fallback.
     if ((mod || e.altKey) && e.code === 'KeyN') {
       e.preventDefault()
-      void createNote('', newNoteDir(get(currentPath), get(sideOpen)))
+      void createNote('', newNoteDir(get(sideOpen)))
       return
     }
     if (mod && e.code === 'KeyJ') {
@@ -627,6 +767,16 @@
         <IdeasView root={root!} />
       {:else if $currentPath === 'folder'}
         <FolderView root={root!} onchangefolder={chooseFolder} onrenamefolder={renameNoteFolder} />
+      {:else if $currentPath && isMediaPath($currentPath)}
+        {#key $currentPath}
+          <MediaView
+            root={root!}
+            path={$currentPath}
+            notes={allNotePaths($noteTree)}
+            onopennote={(p) => openPath(p)}
+            ondelete={() => requestDeleteFile($currentPath!)}
+          />
+        {/key}
       {:else if $currentPath}
         {#key $currentPath}
           <DocView
@@ -635,6 +785,7 @@
             onsaved={onDocSaved}
             onrequestdelete={requestDelete}
             onnavigate={openWikiLink}
+            ondeletefile={requestDeleteFile}
           />
         {/key}
       {/if}
@@ -658,6 +809,16 @@
     cancelLabel={$t('doc.cancel')}
     onconfirm={confirmDeleteNow}
     oncancel={() => (confirmDelete = null)}
+  />
+{/if}
+{#if confirmFile}
+  <ConfirmDialog
+    title={$t('file.deleteTitle')}
+    message={fileDeleteMessage}
+    confirmLabel={$t('doc.delete')}
+    cancelLabel={$t('doc.cancel')}
+    onconfirm={confirmDeleteFileNow}
+    oncancel={() => (confirmFile = null)}
   />
 {/if}
 {#if $paletteOpen}

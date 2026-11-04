@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { noteTree, journalFiles, fileTitles, currentPath, sidebarCollapsed, sideOpen, newNoteDir } from './stores'
+  import { noteTree, journalFiles, fileTitles, currentPath, sidebarCollapsed, sideOpen, newNoteDir, toggleFolder } from './stores'
+  import { isAssetsPath, type FolderNode } from './fs/files'
+  import { kindOfName, KIND_COLORS, KIND_ICONS } from './filetypes'
   import { t, lang, formatDayList, formatDayShort, formatMonth, type Lang } from './i18n'
   import { focusOnMount } from './actions'
   import { autoFolderColor, type FolderColors } from './fs/sidebar-order'
@@ -20,22 +22,37 @@
     /** Manual folder colors; folders not listed get an automatic hue. */
     colors?: FolderColors
     onopen: (path: string) => void
-    /** dir: 'notes' or 'notes/<folder>'. */
+    /** dir: 'notes' or any folder path under it. */
     oncreate: (title: string, dir: string) => void
-    oncreatefolder: (name: string) => void
+    /** New folder `name` inside `parentDir`. */
+    oncreatefolder: (name: string, parentDir: string) => void
     /** Move/reorder: beforeName === null appends at the end of targetDir. */
     onmovenote: (path: string, targetDir: string, beforeName: string | null) => void
-    /** Reorder folders: beforeName === null appends at the end. */
-    onmovefolder: (name: string, beforeName: string | null) => void
-    /** Pick a folder color; null returns it to the automatic one. */
-    oncolor: (name: string, color: string | null) => void
+    /** Folder `path` ends up in `targetDir`, before sibling `beforeName`
+     *  (null = at the end). Same parent = reorder, else a real move. */
+    onmovefolder: (path: string, targetDir: string, beforeName: string | null) => void
+    /** Pick a folder color (key = path under notes/); null = automatic. */
+    oncolor: (rel: string, color: string | null) => void
     onexport: () => void
   } = $props()
 
   // ---------- Folder colors (right-click a folder to pick) ----------
 
-  function folderColor(name: string): string {
-    return colors[name] ?? autoFolderColor(name)
+  /** Manual pick, else the parent's color (a project's subfolders share
+   *  its hue), else the automatic hue of a top-level folder. */
+  function folderColor(rel: string): string {
+    if (colors[rel]) return colors[rel]
+    const parent = rel.split('/').slice(0, -1).join('/')
+    return parent ? folderColor(parent) : autoFolderColor(rel)
+  }
+
+  const relOf = (path: string) => path.slice('notes/'.length)
+
+  /** Notes inside, at any depth; for a folder with no notes (assets/), its files. */
+  function countOf(node: FolderNode): number {
+    const notes = (n: FolderNode): number => n.files.length + n.folders.reduce((s, f) => s + notes(f), 0)
+    const media = (n: FolderNode): number => n.media.length + n.folders.reduce((s, f) => s + media(f), 0)
+    return notes(node) || media(node)
   }
 
   const SWATCHES = ['#e5484d', '#f76b15', '#ffb224', '#30a46c', '#12a594', '#0091ff', '#6e56cf', '#e93d82', '#8d8d8d']
@@ -85,11 +102,15 @@
     sideOpen.update((keys) => (keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key]))
   }
 
-  // "+" follows the open note into its folder while that folder is expanded;
-  // the tooltip says where the note will land.
-  const newDir = $derived(newNoteDir($currentPath, $sideOpen))
+  // One folder open at a time (with the folders containing it): that is the
+  // selection, and both "+" buttons create inside it. The tooltips say where.
+  const newDir = $derived(newNoteDir($sideOpen))
+  const newDirLabel = $derived(newDir.split('/').slice(1).join(' / '))
   const newNoteTip = $derived(
-    newDir === 'notes' ? $t('sidebar.newNote') : $t('sidebar.newNoteIn').replace('{name}', newDir.slice('notes/'.length))
+    newDir === 'notes' ? $t('sidebar.newNote') : $t('sidebar.newNoteIn').replace('{name}', newDirLabel)
+  )
+  const newFolderTip = $derived(
+    newDir === 'notes' ? $t('sidebar.newFolder') : $t('sidebar.newFolderIn').replace('{name}', newDirLabel)
   )
 
   // ---------- Journal grouped by year -> month -> day ----------
@@ -129,11 +150,8 @@
   function onNewFolderKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter') {
       const name = newFolderName.trim()
-      if (name) {
-        oncreatefolder(name)
-        // Show the freshly created folder open, ready for drops.
-        if (!isOpen(`folder:${name}`)) toggleOpen(`folder:${name}`)
-      }
+      // The app opens the freshly created folder, ready for drops.
+      if (name) oncreatefolder(name, newDir)
       newFolderName = ''
       newFolderOpen = false
     } else if (e.key === 'Escape') {
@@ -172,9 +190,9 @@
     if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
   }
 
-  function onFolderDragStart(e: DragEvent, name: string) {
+  function onFolderDragStart(e: DragEvent, path: string) {
     dragging = true
-    e.dataTransfer?.setData(FOLDER_MIME, name)
+    e.dataTransfer?.setData(FOLDER_MIME, path)
     if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
   }
 
@@ -208,7 +226,7 @@
   }
 
   function onDirDragOver(e: DragEvent, dir: string) {
-    if (!acceptNote(e)) return
+    if (!acceptNote(e) || isAssetsPath(dir)) return
     e.preventDefault()
     e.stopPropagation()
     dropInto = dir
@@ -225,30 +243,45 @@
   }
 
   // A folder header accepts two payloads: a note (goes inside the folder)
-  // or another folder (reorders, inserting before this one).
-  function onFolderHeaderDragOver(e: DragEvent, name: string, dir: string) {
+  // or another folder: dropped on the top edge it is inserted before this
+  // one (same level), anywhere else it goes inside this folder.
+  function folderZoneIsBefore(e: DragEvent): boolean {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    return e.clientY - r.top < r.height * 0.35
+  }
+
+  function onFolderHeaderDragOver(e: DragEvent, path: string) {
     const types = e.dataTransfer?.types ?? []
     if (types.includes(FOLDER_MIME)) {
       e.preventDefault()
       e.stopPropagation()
-      dropBeforeFolder = name
-      dropInto = null
+      if (folderZoneIsBefore(e) || isAssetsPath(path)) {
+        dropBeforeFolder = path
+        dropInto = null
+      } else {
+        dropInto = path
+        dropBeforeFolder = null
+      }
       dropBefore = null
     } else {
-      onDirDragOver(e, dir)
+      onDirDragOver(e, path)
     }
   }
 
-  function onFolderHeaderDrop(e: DragEvent, name: string, dir: string) {
+  function onFolderHeaderDrop(e: DragEvent, path: string) {
     e.preventDefault()
     e.stopPropagation()
-    const folderName = e.dataTransfer?.getData(FOLDER_MIME)
+    const folderPath = e.dataTransfer?.getData(FOLDER_MIME)
     const notePath = e.dataTransfer?.getData(NOTE_MIME)
+    const before = dropBeforeFolder === path
     onDragEnd()
-    if (folderName) {
-      if (folderName !== name) onmovefolder(folderName, name)
-    } else if (notePath) {
-      onmovenote(notePath, dir, null)
+    if (folderPath) {
+      if (folderPath === path) return
+      const parent = path.split('/').slice(0, -1).join('/')
+      if (before) onmovefolder(folderPath, parent, path.split('/').pop()!)
+      else onmovefolder(folderPath, path, null)
+    } else if (notePath && !isAssetsPath(path)) {
+      onmovenote(notePath, path, null)
     }
   }
 
@@ -261,11 +294,11 @@
   }
 
   function onSectionDrop(e: DragEvent) {
-    const folderName = e.dataTransfer?.getData(FOLDER_MIME)
-    if (folderName) {
+    const folderPath = e.dataTransfer?.getData(FOLDER_MIME)
+    if (folderPath) {
       e.preventDefault()
       onDragEnd()
-      onmovefolder(folderName, null)
+      onmovefolder(folderPath, 'notes', null)
       return
     }
     onDirDrop(e, 'notes')
@@ -291,7 +324,7 @@
       <div class="side-title">
         {$t('sidebar.notes')}
         <span class="title-actions">
-          <button class="icon-btn" data-tip={$t('sidebar.newFolder')} onclick={() => (newFolderOpen = true)}>
+          <button class="icon-btn" data-tip={newFolderTip} onclick={() => (newFolderOpen = true)}>
             <FolderIcon plus />
           </button>
           <button class="icon-btn" data-tip={newNoteTip} onclick={() => oncreate('', newDir)}>+</button>
@@ -308,53 +341,8 @@
         />
       {/if}
       <ul>
-        {#each $noteTree.folders as folder (folder.name)}
-          {@const dir = `notes/${folder.name}`}
-          <li class="folder-li" class:open={isOpen(`folder:${folder.name}`)} style="--fc: {folderColor(folder.name)}">
-            <button
-              class="side-item side-group"
-              class:open={isOpen(`folder:${folder.name}`)}
-              class:drop-into={dropInto === dir}
-              class:drop-before={dropBeforeFolder === folder.name}
-              draggable="true"
-              onclick={() => toggleOpen(`folder:${folder.name}`)}
-              oncontextmenu={(e) => openColorPick(e, folder.name)}
-              ondragstart={(e) => onFolderDragStart(e, folder.name)}
-              ondragend={onDragEnd}
-              ondragover={(e) => onFolderHeaderDragOver(e, folder.name, dir)}
-              ondrop={(e) => onFolderHeaderDrop(e, folder.name, dir)}
-            >
-              <span class="chev">{isOpen(`folder:${folder.name}`) ? '▾' : '▸'}</span>
-              <FolderIcon open={isOpen(`folder:${folder.name}`)} />
-              {folder.name}
-              <span class="group-count">{folder.files.length}</span>
-            </button>
-            {#if isOpen(`folder:${folder.name}`)}
-              <ul class="side-nested">
-                {#each folder.files as name (name)}
-                  {@const path = `${dir}/${name}`}
-                  <li>
-                    <button
-                      class="side-item"
-                      class:active={$currentPath === path}
-                      class:drop-before={dropBefore === path}
-                      draggable="true"
-                      onclick={() => onopen(path)}
-                      ondragstart={(e) => onDragStart(e, path)}
-                      ondragend={onDragEnd}
-                      ondragover={(e) => onItemDragOver(e, path)}
-                      ondrop={(e) => onItemDrop(e, path)}
-                    >
-                      {noteLabel(path)}
-                    </button>
-                  </li>
-                {/each}
-                {#if folder.files.length === 0}
-                  <li class="side-empty">{$t('sidebar.emptyFolder')}</li>
-                {/if}
-              </ul>
-            {/if}
-          </li>
+        {#each $noteTree.folders as folder (folder.path)}
+          {@render folderItem(folder)}
         {/each}
         {#each $noteTree.files as name (name)}
           {@const path = `notes/${name}`}
@@ -487,6 +475,78 @@
     </div>
   </div>
 {/if}
+
+{#snippet folderItem(folder: FolderNode)}
+  {@const dir = folder.path}
+  {@const rel = relOf(folder.path)}
+  {@const open = isOpen(`folder:${rel}`)}
+  <li class="folder-li" class:open class:assets-li={folder.name === 'assets'} style="--fc: {folderColor(rel)}">
+    <button
+      class="side-item side-group"
+      class:open
+      class:drop-into={dropInto === dir}
+      class:drop-before={dropBeforeFolder === dir}
+      draggable={!isAssetsPath(dir)}
+      onclick={() => toggleFolder(rel)}
+      oncontextmenu={(e) => openColorPick(e, rel)}
+      ondragstart={(e) => onFolderDragStart(e, dir)}
+      ondragend={onDragEnd}
+      ondragover={(e) => onFolderHeaderDragOver(e, dir)}
+      ondrop={(e) => onFolderHeaderDrop(e, dir)}
+    >
+      <span class="chev">{open ? '▾' : '▸'}</span>
+      <FolderIcon {open} />
+      <span class="group-name">{folder.name}</span>
+      <span class="group-count">{countOf(folder)}</span>
+    </button>
+    {#if open}
+      <ul class="side-nested">
+        {#each folder.folders as sub (sub.path)}
+          {@render folderItem(sub)}
+        {/each}
+        {#each folder.files as name (name)}
+          {@const path = `${dir}/${name}`}
+          <li>
+            <button
+              class="side-item"
+              class:active={$currentPath === path}
+              class:drop-before={dropBefore === path}
+              draggable="true"
+              onclick={() => onopen(path)}
+              ondragstart={(e) => onDragStart(e, path)}
+              ondragend={onDragEnd}
+              ondragover={(e) => onItemDragOver(e, path)}
+              ondrop={(e) => onItemDrop(e, path)}
+            >
+              {noteLabel(path)}
+            </button>
+          </li>
+        {/each}
+        {#each folder.media as name (name)}
+          {@const path = `${dir}/${name}`}
+          {@const kind = kindOfName(name)}
+          <li>
+            <button
+              class="side-item side-file"
+              class:active={$currentPath === path}
+              title={name}
+              onclick={() => onopen(path)}
+            >
+              <span class="file-icon" style="color: {kind ? KIND_COLORS[kind] : 'var(--muted)'}">
+                <!-- eslint-disable-next-line svelte/no-at-html-tags -- static SVG from filetypes.ts -->
+                {@html KIND_ICONS[kind ?? 'text']}
+              </span>
+              <span class="file-name">{name}</span>
+            </button>
+          </li>
+        {/each}
+        {#if folder.files.length === 0 && folder.media.length === 0 && folder.folders.length === 0}
+          <li class="side-empty">{$t('sidebar.emptyFolder')}</li>
+        {/if}
+      </ul>
+    {/if}
+  </li>
+{/snippet}
 
 {#snippet month(monthGroup: { month: string; days: string[] })}
   {@const visibleDays = monthGroup.days.filter((d) => d !== today)}

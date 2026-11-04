@@ -79,9 +79,16 @@ export function normalizePath(p: string): string {
 
 const MD_IMAGE_LINK_RE = /(!\[[^\]]*\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g
 
+/** 'notes/Spicchio POS/commerciale/x.md' -> 'notes/Spicchio POS' (the project). */
+function projectOf(dir: string): string {
+  return dir.split('/').slice(0, 2).join('/')
+}
+
 /**
- * Move a markdown note to another directory, carrying its local images
- * along so relative links keep working. Returns the final content written.
+ * Move a markdown note to another directory. Inside the same project folder
+ * (e.g. into one of its subfolders) the files stay where they are, shared
+ * with the other notes, and only the relative links are rewritten. Towards
+ * another project the note's local images travel along with it.
  */
 export async function moveNoteWithAssets(
   root: FileSystemDirectoryHandle,
@@ -94,7 +101,9 @@ export async function moveNoteWithAssets(
   const fromDir = from.split('/').slice(0, -1).join('/')
   const toDir = to.split('/').slice(0, -1).join('/')
   let out = content
-  if (fromDir !== toDir) {
+  if (fromDir !== toDir && projectOf(fromDir) === projectOf(toDir)) {
+    out = relinkContent(content, fromDir, toDir)
+  } else if (fromDir !== toDir) {
     for (const m of content.matchAll(MD_IMAGE_LINK_RE)) {
       const src = m[2]
       if (/^(https?:|data:|blob:)/.test(src) || src.startsWith('/')) continue
@@ -145,37 +154,158 @@ export async function listMarkdown(root: FileSystemDirectoryHandle, folder: stri
   return names
 }
 
-/** Subfolder reserved for images dropped into documents — never a note folder. */
+/** Subfolder where images dropped into documents are saved. It shows in the
+ *  sidebar (to see and delete what is in there) but never receives notes. */
 export const ASSETS_DIR = 'assets'
 
-export interface NoteTree {
-  /** .md files directly inside notes/. */
+/** A folder of notes/ at any depth. `path` is from the vault root
+ *  ('notes/Spicchio POS/commerciale'); notes/ itself is the tree's root node. */
+export interface FolderNode {
+  name: string
+  path: string
+  /** .md files directly inside. */
   files: string[]
-  /** One level of user folders inside notes/, each with its .md files. */
-  folders: Array<{ name: string; files: string[] }>
+  /** Every other file directly inside (images, PDFs, videos…). */
+  media: string[]
+  folders: FolderNode[]
 }
 
-/** List notes/ including one level of user subfolders (assets/ excluded). */
-export async function listNotesTree(root: FileSystemDirectoryHandle): Promise<NoteTree> {
-  const tree: NoteTree = { files: [], folders: [] }
-  try {
-    const dir = await root.getDirectoryHandle('notes')
-    for await (const entry of dir.values()) {
-      if (entry.kind === 'file' && entry.name.endsWith('.md')) {
-        tree.files.push(entry.name)
-      } else if (entry.kind === 'directory' && entry.name !== ASSETS_DIR) {
-        const files: string[] = []
-        for await (const sub of (entry as FileSystemDirectoryHandle).values()) {
-          if (sub.kind === 'file' && sub.name.endsWith('.md')) files.push(sub.name)
-        }
-        tree.folders.push({ name: entry.name, files })
-      }
+export type NoteTree = FolderNode
+
+export function emptyTree(): NoteTree {
+  return { name: 'notes', path: 'notes', files: [], media: [], folders: [] }
+}
+
+async function listFolder(dir: FileSystemDirectoryHandle, name: string, path: string): Promise<FolderNode> {
+  const node: FolderNode = { name, path, files: [], media: [], folders: [] }
+  for await (const entry of dir.values()) {
+    // Dotfiles (.DS_Store, .brain…) are system clutter, never content.
+    if (entry.name.startsWith('.')) continue
+    if (entry.kind === 'file') {
+      if (entry.name.endsWith('.md')) node.files.push(entry.name)
+      else node.media.push(entry.name)
+    } else {
+      node.folders.push(await listFolder(entry as FileSystemDirectoryHandle, entry.name, `${path}/${entry.name}`))
     }
+  }
+  node.media.sort((a, b) => a.localeCompare(b))
+  node.folders.sort((a, b) => a.name.localeCompare(b.name))
+  return node
+}
+
+/** List notes/ with all its subfolders, at any depth, assets/ included. */
+export async function listNotesTree(root: FileSystemDirectoryHandle): Promise<NoteTree> {
+  try {
+    return await listFolder(await root.getDirectoryHandle('notes'), 'notes', 'notes')
   } catch {
     // Folder missing: treat as empty.
+    return emptyTree()
   }
-  tree.folders.sort((a, b) => a.name.localeCompare(b.name))
-  return tree
+}
+
+/** Every .md path in the tree, depth first. */
+export function allNotePaths(node: FolderNode): string[] {
+  return [...node.files.map((n) => `${node.path}/${n}`), ...node.folders.flatMap(allNotePaths)]
+}
+
+export function findFolder(node: FolderNode, path: string): FolderNode | null {
+  if (node.path === path) return node
+  for (const f of node.folders) {
+    if (path === f.path || path.startsWith(f.path + '/')) return findFolder(f, path)
+  }
+  return null
+}
+
+/** True for an assets/ folder or anything inside one: no notes go there. */
+export function isAssetsPath(path: string): boolean {
+  return path.split('/').includes(ASSETS_DIR)
+}
+
+/** Relative path from directory `fromDir` to `to` (both vault paths). */
+export function relativePath(fromDir: string, to: string): string {
+  const a = fromDir.split('/').filter(Boolean)
+  const b = to.split('/').filter(Boolean)
+  let i = 0
+  while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++
+  return [...a.slice(i).map(() => '..'), ...b.slice(i)].join('/')
+}
+
+// Any markdown link or embed target: [x](src) and ![x](src), optional title.
+const MD_LINK_RE = /(\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g
+
+function isLocalSrc(src: string): boolean {
+  return !/^(https?:|data:|blob:|mailto:|#)/.test(src) && !src.startsWith('/')
+}
+
+/** Vault path a relative link of a note in `noteDir` points to. */
+export function resolveLink(noteDir: string, src: string): string {
+  let decoded = src
+  try {
+    decoded = decodeURI(src)
+  } catch {
+    // Malformed escape: take it literally.
+  }
+  return normalizePath(`${noteDir}/${decoded}`)
+}
+
+/** Notes (vault paths) that link or embed the file at `target`. */
+export async function findReferences(root: FileSystemDirectoryHandle, notePaths: string[], target: string): Promise<string[]> {
+  const refs: string[] = []
+  const name = target.split('/').pop()!
+  for (const path of notePaths) {
+    const content = await readFile(root, path)
+    // Cheap pre-filter: the file name must appear somewhere in the note.
+    if (!content || !content.includes(name.split('.')[0])) continue
+    const dir = path.split('/').slice(0, -1).join('/')
+    for (const m of content.matchAll(MD_LINK_RE)) {
+      if (isLocalSrc(m[2]) && resolveLink(dir, m[2]) === target) {
+        refs.push(path)
+        break
+      }
+    }
+  }
+  return refs
+}
+
+/** Drop every `![alt](src)` / `[text](src)` pointing at `target` from a note's
+ *  text (whole line when the embed was alone on it). */
+export function stripReferences(content: string, noteDir: string, target: string): string {
+  const EMBED_RE = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+  return content
+    .split('\n')
+    .flatMap((line) => {
+      let hit = false
+      const out = line.replace(EMBED_RE, (whole, src: string) => {
+        if (isLocalSrc(src) && resolveLink(noteDir, src) === target) {
+          hit = true
+          return ''
+        }
+        return whole
+      })
+      if (hit && out.trim() === '') return []
+      return [hit ? out.replace(/\s+$/, '') : line]
+    })
+    .join('\n')
+}
+
+/**
+ * A note moved from `oldDir` to `newDir`: rewrite its relative links so they
+ * still reach the same files. `moved` maps old vault prefixes to new ones for
+ * files that moved together with the note (a whole folder moving).
+ */
+export function relinkContent(content: string, oldDir: string, newDir: string, moved?: { from: string; to: string }): string {
+  if (oldDir === newDir && !moved) return content
+  return content.replace(MD_LINK_RE, (whole, open: string, src: string, close: string) => {
+    if (!isLocalSrc(src)) return whole
+    let target = resolveLink(oldDir, src)
+    if (moved && (target === moved.from || target.startsWith(moved.from + '/'))) {
+      target = moved.to + target.slice(moved.from.length)
+    }
+    const rel = relativePath(newDir, target)
+    if (normalizePath(`${newDir}/${rel}`) !== target) return whole
+    const encoded = encodeURI(rel)
+    return resolveLink(newDir, src) === target ? whole : `${open}${encoded}${close}`
+  })
 }
 
 export async function createFolder(root: FileSystemDirectoryHandle, path: string): Promise<void> {
@@ -222,5 +352,30 @@ export async function renameFolder(root: FileSystemDirectoryHandle, path: string
   const from = await dir.getDirectoryHandle(name)
   const to = await dir.getDirectoryHandle(newName, { create: true })
   await copyDirRecursive(from, to)
+  await dir.removeEntry(name, { recursive: true })
+}
+
+/**
+ * Move a whole folder to `to` (a vault path, parent created if needed):
+ * copy the tree, rewrite the relative links of every note inside so they
+ * keep reaching the same files (inside the folder they move along; outside
+ * they get a new ../ count), then delete the old folder.
+ */
+export async function moveFolderTo(root: FileSystemDirectoryHandle, from: string, to: string): Promise<void> {
+  if (from === to || to.startsWith(from + '/')) return
+  const { dir, name } = await resolveDir(root, from)
+  const src = await dir.getDirectoryHandle(name)
+  const dest = (await resolveDir(root, to, true)).dir
+  const target = await dest.getDirectoryHandle(to.split('/').pop()!, { create: true })
+  await copyDirRecursive(src, target)
+  const moved = await listFolder(target, to.split('/').pop()!, to)
+  for (const newPath of allNotePaths(moved)) {
+    const content = await readFile(root, newPath)
+    if (content == null) continue
+    const newDir = newPath.split('/').slice(0, -1).join('/')
+    const oldDir = from + newDir.slice(to.length)
+    const out = relinkContent(content, oldDir, newDir, { from, to })
+    if (out !== content) await writeFile(root, newPath, out)
+  }
   await dir.removeEntry(name, { recursive: true })
 }

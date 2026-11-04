@@ -1,6 +1,6 @@
 import { writable } from 'svelte/store'
 import type { BrainIndex } from './palette/snippets'
-import type { NoteTree } from './fs/files'
+import { emptyTree, type NoteTree } from './fs/files'
 
 export type AppState = 'loading' | 'unsupported' | 'welcome' | 'reconnect' | 'ready'
 
@@ -84,11 +84,31 @@ docWidth.subscribe((w) => {
 
 export const sidebarCollapsed = writable(false)
 
-// Which sidebar groups are expanded ('folder:<name>', 'year:2026',
-// 'month:2026-09'). A store (not Sidebar state) because "new note" also
-// looks at it: with a note open inside an expanded folder, the new note is
-// created in that folder.
+// Which sidebar groups are expanded ('folder:<path under notes/>' such as
+// 'folder:Spicchio POS/commerciale', 'year:2026', 'month:2026-09'). Folders
+// follow one rule: a single chain is open at a time (a folder and the ones
+// containing it), so "the open folder" is always unambiguous and the "+"
+// buttons create inside it. A store (not Sidebar state) because "new note"
+// and Alt+N also read it.
 const SIDE_OPEN_KEY = 'brain:side-open'
+
+const FOLDER_PREFIX = 'folder:'
+
+/** Keep the deepest open folder of the stored set and its ancestors only
+ *  (older versions allowed several folders open side by side). */
+function oneFolderChain(keys: string[]): string[] {
+  const folders = keys.filter((k) => k.startsWith(FOLDER_PREFIX)).map((k) => k.slice(FOLDER_PREFIX.length))
+  const others = keys.filter((k) => !k.startsWith(FOLDER_PREFIX))
+  if (folders.length === 0) return others
+  const deepest = folders.reduce((a, b) => (b.split('/').length > a.split('/').length ? b : a))
+  return [...others, ...folderChain(deepest)]
+}
+
+/** 'A/B/C' -> ['folder:A', 'folder:A/B', 'folder:A/B/C']. */
+function folderChain(rel: string): string[] {
+  const parts = rel.split('/')
+  return parts.map((_, i) => FOLDER_PREFIX + parts.slice(0, i + 1).join('/'))
+}
 
 function initialSideOpen(): string[] {
   const d = new Date()
@@ -96,7 +116,7 @@ function initialSideOpen(): string[] {
   const monthKey = `month:${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
   try {
     const parsed = JSON.parse(localStorage.getItem(SIDE_OPEN_KEY) ?? '[]') as unknown
-    const keys = Array.isArray(parsed) ? (parsed as string[]) : []
+    const keys = oneFolderChain(Array.isArray(parsed) ? (parsed as string[]) : [])
     return keys.includes(monthKey) ? keys : [...keys, monthKey]
   } catch {
     return [monthKey]
@@ -112,15 +132,42 @@ sideOpen.subscribe((keys) => {
   }
 })
 
-/** Where a new note goes: the folder of the open note while that folder is
- *  expanded in the sidebar ("as if already inside it"), else notes/. */
-export function newNoteDir(path: string | null, open: string[]): string {
-  const m = path?.match(/^notes\/([^/]+)\/[^/]+\.md$/)
-  return m && open.includes(`folder:${m[1]}`) ? `notes/${m[1]}` : 'notes'
+/** Open folder `rel` (path under notes/): every other folder closes except
+ *  the ones containing it. Closing it closes its subfolders too. */
+export function toggleFolder(rel: string): void {
+  sideOpen.update((keys) => {
+    const others = keys.filter((k) => !k.startsWith(FOLDER_PREFIX))
+    if (keys.includes(FOLDER_PREFIX + rel)) {
+      const parent = rel.split('/').slice(0, -1).join('/')
+      return parent ? [...others, ...folderChain(parent)] : others
+    }
+    return [...others, ...folderChain(rel)]
+  })
 }
 
-/** notes/ listing with one level of user folders, in the user's manual order. */
-export const noteTree = writable<NoteTree>({ files: [], folders: [] })
+/** Open exactly this folder chain (after creating or moving a folder). */
+export function openFolder(rel: string): void {
+  sideOpen.update((keys) => [...keys.filter((k) => !k.startsWith(FOLDER_PREFIX)), ...folderChain(rel)])
+}
+
+/** The deepest open folder as a vault path ('notes/Spicchio POS/prodotto'),
+ *  or 'notes' when every folder is closed. */
+export function openFolderDir(open: string[]): string {
+  const rels = open.filter((k) => k.startsWith(FOLDER_PREFIX)).map((k) => k.slice(FOLDER_PREFIX.length))
+  if (rels.length === 0) return 'notes'
+  return 'notes/' + rels.reduce((a, b) => (b.split('/').length > a.split('/').length ? b : a))
+}
+
+/** Where a new note or folder goes: inside the open folder. An assets/
+ *  folder only holds files, so its first non-assets ancestor takes the note. */
+export function newNoteDir(open: string[]): string {
+  const parts = openFolderDir(open).split('/')
+  const at = parts.indexOf('assets')
+  return (at > 0 ? parts.slice(0, at) : parts).join('/')
+}
+
+/** notes/ as a tree (any depth, files and media), in the user's manual order. */
+export const noteTree = writable<NoteTree>(emptyTree())
 /** File names (not paths) inside journal/. */
 export const journalFiles = writable<string[]>([])
 
@@ -148,7 +195,8 @@ hideMarkup.subscribe((v) => {
 /** path -> title from frontmatter, filled in by the background index. */
 export const fileTitles = writable<Record<string, string>>({})
 
-/** 'notes/x.md' | 'journal/YYYY-MM-DD.md' | 'ideas' | 'folder' | null while booting. */
+/** 'notes/x.md' | 'journal/YYYY-MM-DD.md' | 'ideas' | 'folder' | a non-note
+ *  file under notes/ ('notes/X/assets/a.png', shown by MediaView) | null while booting. */
 export const currentPath = writable<string | null>(null)
 
 export const paletteOpen = writable(false)

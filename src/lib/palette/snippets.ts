@@ -2,7 +2,7 @@
 // Loaded instantly on startup, rebuilt lazily in the background.
 
 import { parseDocument, type BrainDoc } from '../parser/parser'
-import { listMarkdown, listNotesTree, readFile, writeFile } from '../fs/files'
+import { allNotePaths, listMarkdown, listNotesTree, readFile, writeFile } from '../fs/files'
 
 export interface Snippet {
   file: string
@@ -66,8 +66,7 @@ export async function buildIndex(root: FileSystemDirectoryHandle): Promise<Brain
   const index = emptyIndex()
   const tree = await listNotesTree(root)
   const paths = [
-    ...tree.files.map((n) => `notes/${n}`),
-    ...tree.folders.flatMap((f) => f.files.map((n) => `notes/${f.name}/${n}`)),
+    ...allNotePaths(tree),
     ...(await listMarkdown(root, 'journal')).map((n) => `journal/${n}`)
   ]
   for (const path of paths) {

@@ -194,6 +194,10 @@ const noteTheme = EditorView.theme({
 /** Resolves an image src (usually a path relative to the document) to a URL. */
 export type ImageResolver = (src: string) => Promise<string | null>
 
+/** Delete the file behind an embed from disk. The host asks for confirmation
+ *  and then calls `removeText` to drop the embed from this note. */
+export type DeleteFile = (src: string, removeText: () => void) => void
+
 const IMAGE_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
 
 // Video, audio and document files reuse the ![alt](src) image syntax — the
@@ -235,6 +239,33 @@ function copyImageWithToast(img: HTMLImageElement): void {
     () => showToast(get(t)('toast.imgCopied')),
     () => showToast(get(t)('toast.copyFail'))
   )
+}
+
+/** Menu entry "Delete file" for a local embed. The position is taken now:
+ *  by the time the user confirms, the widget DOM may have been rebuilt. */
+function deleteFileItem(view: EditorView, dom: HTMLElement, src: string, del: DeleteFile | null) {
+  if (!del || /^(https?:|data:|blob:)/.test(src)) return []
+  const pos = view.posAtDOM(dom)
+  return [{ label: get(t)('media.deleteFile'), run: () => del(src, () => deleteMediaSrc(view, src, pos)) }]
+}
+
+/** Remove the `![alt](src)` embed nearest to `pos` (same line first). */
+function deleteMediaSrc(view: EditorView, src: string, pos: number): void {
+  const doc = view.state.doc
+  const at = Math.min(pos, doc.length)
+  let best: { from: number; to: number } | null = null
+  for (let n = 1; n <= doc.lines; n++) {
+    const line = doc.line(n)
+    IMAGE_RE.lastIndex = 0
+    let m: RegExpExecArray | null
+    while ((m = IMAGE_RE.exec(line.text))) {
+      if (m[2] !== src) continue
+      const from = line.from + m.index
+      const to = from + m[0].length
+      if (!best || Math.abs(from - at) < Math.abs(best.from - at)) best = { from, to }
+    }
+  }
+  if (best) view.dispatch({ changes: best })
 }
 
 /** Remove the media's `![alt](src)` from the document (undoable, file kept). */
@@ -341,7 +372,8 @@ class ImageWidget extends WidgetType {
   constructor(
     readonly src: string,
     readonly alt: string,
-    readonly resolve: ImageResolver
+    readonly resolve: ImageResolver,
+    readonly del: DeleteFile | null = null
   ) {
     super()
   }
@@ -371,7 +403,8 @@ class ImageWidget extends WidgetType {
       e.stopPropagation()
       showMediaMenu(e.clientX, e.clientY, [
         { label: get(t)('img.copy'), run: () => copyImageWithToast(img) },
-        { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) }
+        { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) },
+        ...deleteFileItem(view, wrap, this.src, this.del)
       ])
     })
     // Double click = quick copy (the player owns double clicks on videos,
@@ -407,7 +440,8 @@ class VideoWidget extends WidgetType {
     readonly src: string,
     readonly alt: string,
     readonly resolve: ImageResolver,
-    readonly audio = false
+    readonly audio = false,
+    readonly del: DeleteFile | null = null
   ) {
     super()
   }
@@ -438,7 +472,8 @@ class VideoWidget extends WidgetType {
       e.stopPropagation()
       showMediaMenu(e.clientX, e.clientY, [
         { label: get(t)(this.audio ? 'audio.download' : 'video.download'), run: () => downloadFile(video.src, this.src) },
-        { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) }
+        { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) },
+        ...deleteFileItem(view, wrap, this.src, this.del)
       ])
     })
     return wrap
@@ -457,7 +492,8 @@ class FileWidget extends WidgetType {
     readonly src: string,
     readonly alt: string,
     readonly kind: FileKind,
-    readonly resolve: ImageResolver
+    readonly resolve: ImageResolver,
+    readonly del: DeleteFile | null = null
   ) {
     super()
   }
@@ -512,7 +548,8 @@ class FileWidget extends WidgetType {
         { label: get(t)('file.copy'), run: () => url && void copyFileToClipboard(url, mime) },
         ...(OPENS_AS_TEXT.has(this.kind) ? [{ label: get(t)('csv.copy'), run: () => url && copyCsvText(url) }] : []),
         { label: get(t)('file.download'), run: () => url && downloadFile(url, this.src) },
-        { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) }
+        { label: get(t)('media.delete'), run: () => deleteMediaAt(view, wrap) },
+        ...deleteFileItem(view, wrap, this.src, this.del)
       ]
       showMediaMenu(e.clientX, e.clientY, items)
     })
@@ -551,7 +588,7 @@ class FileWidget extends WidgetType {
  * caret is merely on the same line — otherwise a note whose only content is
  * an image could never show it.
  */
-function imagePlugin(resolve: ImageResolver): Extension {
+function imagePlugin(resolve: ImageResolver, del: DeleteFile | null): Extension {
   const build = (view: EditorView): DecorationSet => {
     const builder = new RangeSetBuilder<Decoration>()
     const sel = view.state.selection.ranges
@@ -571,12 +608,12 @@ function imagePlugin(resolve: ImageResolver): Extension {
           if (!selectionInside(from, to)) {
             const fileKind = FILE_SRC_RE.test(m[2]) ? fileKindOf(m[2]) : null
             const widget = VIDEO_SRC_RE.test(m[2])
-              ? new VideoWidget(m[2], m[1], resolve)
+              ? new VideoWidget(m[2], m[1], resolve, false, del)
               : AUDIO_SRC_RE.test(m[2])
-                ? new VideoWidget(m[2], m[1], resolve, true)
+                ? new VideoWidget(m[2], m[1], resolve, true, del)
                 : fileKind
-                  ? new FileWidget(m[2], m[1], fileKind, resolve)
-                  : new ImageWidget(m[2], m[1], resolve)
+                  ? new FileWidget(m[2], m[1], fileKind, resolve, del)
+                  : new ImageWidget(m[2], m[1], resolve, del)
             builder.add(from, to, Decoration.replace({ widget }))
           }
         }
@@ -1153,6 +1190,8 @@ export async function createNoteEditor(
     text: string
     hideMarkup: boolean
     resolveImage: ImageResolver
+    /** "Delete file" on an embed (absent = only "Remove from note"). */
+    deleteFile?: DeleteFile
     /** Persist a pasted image and return the relative markdown src. */
     saveImage(file: File): Promise<string>
     onChange(text: string): void
@@ -1198,7 +1237,7 @@ export async function createNoteEditor(
         tableExtension(opts.onNavigate),
         tableWidthPlugin(),
         wikiLinkPlugin(opts.onNavigate),
-        imagePlugin(opts.resolveImage),
+        imagePlugin(opts.resolveImage, opts.deleteFile ?? null),
         // Pasting an image or video (screenshot, copied file) saves it next
         // to the document and inserts its markdown link at the caret.
         EditorView.domEventHandlers({
